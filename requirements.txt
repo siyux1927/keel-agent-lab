@@ -1,0 +1,8 @@
+# 用区间而不是精确 pin: 目标环境(conda myenv)是与其他项目共享的,
+# 精确 pin 会把别人的 fastapi/starlette 一并降级掉。
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.10
+httpx>=0.28
+pytest>=8.3
+pytest-asyncio>=0.25

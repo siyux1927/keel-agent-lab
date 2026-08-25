@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentp"
+version = "0.1.0"
+description = "Agent 运行时: 上下文工程 / 记忆系统 / Loop Engineering / 多 Agent 编排"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.10",
+    "httpx>=0.28",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.25"]
+accurate-tokens = ["tiktoken>=0.8"]
+
+[tool.setuptools.packages.find]
+include = ["agentp*"]
+
+[tool.setuptools.package-data]
+"agentp.server" = ["static/*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+addopts = "-q --tb=short"
