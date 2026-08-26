@@ -228,12 +228,13 @@ class MemoryManager:
         session_id: str = "",
         top_k: Optional[int] = None,
         layers: Optional[Sequence[MemoryLayer]] = None,
+        use_mmr: bool = True,
     ) -> list[RetrievalResult]:
         top_k = top_k or settings.memory.retrieval_top_k
         query_vec = (await self.provider.embed([query]))[0]
         return self.store.search(
             query=query, query_embedding=query_vec, top_k=top_k,
-            layers=layers, session_id=session_id or None,
+            layers=layers, session_id=session_id or None, use_mmr=use_mmr,
         )
 
     async def build_context_items(
@@ -425,3 +426,13 @@ def get_memory() -> MemoryManager:
 def reset_memory() -> None:
     global _default_manager
     _default_manager = None
+
+
+def set_memory(manager: Optional[MemoryManager]) -> None:
+    """显式指定全局记忆管理器。
+
+    kb_search 工具内部取的是 get_memory() 单例, 只给引擎注入 memory 是不够的 ——
+    做对照实验时必须让工具侧看到同一份记忆, 否则两组的检索基线不一样。
+    """
+    global _default_manager
+    _default_manager = manager

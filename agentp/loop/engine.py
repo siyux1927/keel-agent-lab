@@ -82,6 +82,7 @@ class ReActEngine:
         name: str = "AgentP",
         system_extra: str = "",
         verify: bool = True,
+        inject_action_digest: bool = True,
     ) -> None:
         self._provider = provider
         self._memory = memory
@@ -93,6 +94,9 @@ class ReActEngine:
         self.name = name
         self.system_extra = system_extra
         self.verify = verify
+        # 关掉它就退化成"只靠 scratchpad 记得自己做过什么"。留这个开关是为了能
+        # 量化它的价值: scratchpad 是可压缩分区, 窗口一紧就会把动作记录压掉。
+        self.inject_action_digest = inject_action_digest
         self.max_verify_rounds = 1
 
     # -- 惰性依赖 ----------------------------------------------------------
@@ -291,7 +295,7 @@ class ReActEngine:
         extra = self.system_extra
         # 已执行动作清单放进系统提示词而不是 scratchpad: 后者会被压缩,
         # 而"我做过什么"一旦丢失, 模型必然重复调用同一个工具
-        digest = state.action_digest()
+        digest = state.action_digest() if self.inject_action_digest else ""
         if digest:
             extra += f"\n\n{digest}"
         if force_answer:

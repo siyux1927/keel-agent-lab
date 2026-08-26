@@ -183,6 +183,25 @@ async def test_orchestrator_records_skill(memory):
     assert memory.store.all(MemoryLayer.PROCEDURAL)
 
 
+async def test_worker_spans_land_in_orchestrator_trace(memory):
+    """Worker 的 span 必须挂在编排这一条 trace 上。
+
+    回归用例。原先 Worker 调 engine.run() 没把 tracer 传下去, 引擎于是自建了一条
+    新 trace —— 子任务里所有的 LLM 调用和 token 全部漏出编排的账本, 实测编排模式的
+    总 token 被少记了 80% 以上。成本核算错到这个程度, 就没法回答"钱花在哪"了。
+    """
+    result = await Orchestrator(memory=memory).run(
+        "查一下知识库里的发布规定; 同时计算 (99+1)*3 的结果", session_id="o5"
+    )
+    names = [s.name for s in result.tracer.spans]
+    assert any(n.startswith("agent.run") for n in names), "worker 的 agent.run 不在编排 trace 里"
+    assert any(n.startswith("loop.step") for n in names), "worker 的步级 span 不在编排 trace 里"
+    # token 必须覆盖 worker 的消耗, 而不只是规划/汇总/质检那几次
+    assert result.tracer.totals()["total_tokens"] > 0
+    worker_tokens = sum(n.meta.get("tokens", 0) for n in result.graph.nodes.values())
+    assert result.tracer.totals()["total_tokens"] >= worker_tokens
+
+
 async def test_orchestrator_survives_cyclic_plan(memory):
     """规划器吐出环时降级成全并行, 而不是让整轮失败。"""
     orchestrator = Orchestrator(memory=memory)

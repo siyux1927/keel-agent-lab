@@ -66,8 +66,15 @@ class TracedProvider:
         missing = [t for t in texts if stable_hash(t) not in self._embed_cache]
         if missing:
             tracer = current_tracer()
-            with tracer.span("llm.embed", kind="llm", count=len(missing)):
+            with tracer.span("llm.embed", kind="llm", count=len(missing)) as span:
                 vectors = await self.inner.embed(missing)
+                # 把降级状态带进 trace: 语义检索悄悄退化成词法匹配是最难发现的一类故障,
+                # 至少要让它在调用链上留下痕迹
+                if getattr(self.inner, "embed_degraded", False):
+                    span.attributes["degraded"] = True
+                    span.attributes["degraded_reason"] = self.inner.embed_degraded_reason[:160]
+                if vectors:
+                    span.attributes["dim"] = len(vectors[0])
             for text, vec in zip(missing, vectors):
                 self._embed_cache[stable_hash(text)] = vec
             self.stats["embed_calls"] += 1
@@ -109,8 +116,19 @@ def reset_provider() -> None:
     _default = None
 
 
+def set_provider(provider: Optional[TracedProvider]) -> None:
+    """显式指定全局 Provider。
+
+    存在的理由是 kb_search 这类工具走的是 get_provider()/get_memory() 单例, 而不是
+    调用方注入的实例。做 A/B 实验时若只注入引擎, 工具侧仍会用旧 Provider, 两组数据
+    就不可比了。
+    """
+    global _default
+    _default = provider
+
+
 __all__ = [
     "LLMProvider", "LLMResponse", "Message", "ToolCall", "Usage", "estimate_cost",
     "MockProvider", "OpenAICompatProvider", "TracedProvider",
-    "build_provider", "get_provider", "reset_provider",
+    "build_provider", "get_provider", "reset_provider", "set_provider",
 ]

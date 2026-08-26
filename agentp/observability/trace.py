@@ -191,6 +191,10 @@ class TraceStore:
 
     def put(self, tracer: Tracer) -> None:
         self._items[tracer.trace_id] = tracer.to_dict()
+        # 同一条 trace 会被 put 多次(编排共享 tracer, 每个 worker 收尾都会写一遍),
+        # 不去重的话 _order 里堆满重复 id, 淘汰时会把还在用的条目误删。
+        if tracer.trace_id in self._order:
+            self._order.remove(tracer.trace_id)
         self._order.append(tracer.trace_id)
         while len(self._order) > self.capacity:
             self._items.pop(self._order.pop(0), None)

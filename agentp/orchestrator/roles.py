@@ -112,8 +112,12 @@ class Worker:
             goal = f"{node.goal}\n\n可直接使用的上游结果:\n{context}"
 
         # 子任务用独立 session: 避免多个 worker 的工作记忆互相串味,
-        # 但长期记忆(语义/程序性)仍然共享, 该复用的知识不会丢
-        result = await engine.run(goal, session_id=f"{session_id}::{node.id}")
+        # 但长期记忆(语义/程序性)仍然共享, 该复用的知识不会丢。
+        # tracer 必须显式传下去: 不传的话 engine 会自建一条新 trace, 于是 worker 的
+        # token 和耗时全部漏出编排的账本 —— 成本核算会凭空少掉一大半。
+        result = await engine.run(
+            goal, session_id=f"{session_id}::{node.id}", tracer=current_tracer()
+        )
         node.meta.update({
             "steps": result.state.step_count,
             "tools": result.state.successful_tools(),

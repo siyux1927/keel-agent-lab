@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import random
+import sys
 from typing import Any, Optional, Sequence
 
 import httpx
@@ -38,6 +39,11 @@ class OpenAICompatProvider:
         self.timeout = cfg.timeout_s
         self.max_retries = cfg.max_retries
         self._client: Optional[httpx.AsyncClient] = None
+        # embedding 降级状态。做成可读属性而不是闷在 except 里, 是因为"降级了但没人知道"
+        # 比"直接报错"更危险: 链路看着是通的, 语义检索其实已经废了。
+        self.embed_degraded = False
+        self.embed_degraded_reason = ""
+        self.embed_dim: Optional[int] = None
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
@@ -136,15 +142,53 @@ class OpenAICompatProvider:
             latency_ms=latency_ms,
         )
 
+    def _fallback_embed(self, texts: Sequence[str]) -> list[list[float]]:
+        dim = settings.context.embedding_dim
+        return [hash_embed(t, dim) for t in texts]
+
     async def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        """真实 embedding, 失败则降级到本地 hashing 向量。
+
+        降级本身是对的 —— embedding 服务挂了不该让整个 Agent 停摆。但这里有两个
+        必须处理的坑, 都是实测踩出来的:
+
+        1. **降级要有记性**。DeepSeek 这类只提供 chat 的服务上 /embeddings 恒定 404,
+           而检索链路每一步都要 embed。不latch 的话每次都白跑 max_retries+1 次 HTTP
+           外加指数退避睡眠, 一次多步任务能凭空多等几十秒, 还在无意义地敲人家的接口。
+
+        2. **降级要出声**。hashing 向量是词袋随机投影, 不懂近义词, 语义召回等于报废;
+           更隐蔽的是维度: 库里存的是 256 维 hashing 向量, 换上 1024 维真实 embedding
+           之后 cosine() 遇到长度不等**直接返回 0.0 而不报错**, 于是向量通道静默失效,
+           检索悄悄退化成纯 BM25。全程没有任何异常, 只有召回质量在掉。
+           所以这里要把降级状态和维度变化都显式暴露出来。
+        """
+        if self.embed_degraded:
+            return self._fallback_embed(texts)
         try:
             data = await self._post(
                 "/embeddings", {"model": self.embedding_model, "input": list(texts)}
             )
             items = sorted(data.get("data", []), key=lambda d: d.get("index", 0))
-            return [item["embedding"] for item in items]
-        except Exception:
-            # embedding 服务挂了不该让整个 Agent 停摆, 降级到本地 hashing 向量:
-            # 召回质量下降但链路仍然可用
-            dim = settings.context.embedding_dim
-            return [hash_embed(t, dim) for t in texts]
+            vectors = [item["embedding"] for item in items]
+            if vectors:
+                dim = len(vectors[0])
+                if self.embed_dim is not None and dim != self.embed_dim:
+                    self._warn(f"embedding 维度从 {self.embed_dim} 变成 {dim}, "
+                               f"旧记忆的向量通道会静默失效(cosine 长度不等返回 0), 需要重建索引")
+                elif self.embed_dim is None and dim != settings.context.embedding_dim:
+                    self._warn(f"embedding 实际维度 {dim} != 配置的 embedding_dim "
+                               f"{settings.context.embedding_dim}; 与已有 hashing 向量"
+                               f"无法比较, 混用会让向量召回失效, 建议清库重嵌入")
+                self.embed_dim = dim
+            return vectors
+        except Exception as exc:  # noqa: BLE001
+            self.embed_degraded = True
+            self.embed_degraded_reason = f"{type(exc).__name__}: {exc}"
+            self._warn(f"embedding 接口不可用({self.embed_degraded_reason[:120]}), "
+                       f"已永久降级为本地 hashing 向量 —— 语义检索退化为词法匹配。"
+                       f"要恢复语义召回请配置一个真正提供 /embeddings 的服务。")
+            return self._fallback_embed(texts)
+
+    @staticmethod
+    def _warn(message: str) -> None:
+        print(f"[agentp][WARN] {message}", file=sys.stderr, flush=True)

@@ -1,4 +1,4 @@
-﻿"""Loop Engineering: 护栏、死循环、熔断、反思、端到端收敛。"""
+"""Loop Engineering: 护栏、死循环、熔断、反思、端到端收敛。"""
 
 from __future__ import annotations
 
@@ -80,6 +80,26 @@ def test_cycle_detection_catches_alternating_actions():
     assert decision.action == "stop"
     assert decision.stop_reason == StopReason.CYCLE_DETECTED
     assert decision.detail["period"] == 2
+
+
+def test_cycle_window_zero_disables_the_detector():
+    """cycle_detect_window=0 必须是"关掉这个检测器", 而不是"窗口无限大"。
+
+    回归用例。原实现写的是 fingerprints()[-window:], 而 Python 里 lst[-0:] 等价于
+    lst[0:] —— 取的是全部历史。想关掉检测器的人会得到一个反而更激进的检测器,
+    做消融实验时这种"看着关了其实开着"的开关会直接让结论反过来。
+    """
+    from dataclasses import replace
+
+    from agentp.config import LoopConfig
+
+    actions = [("a", {"i": 1}), ("b", {"i": 2}), ("a", {"i": 1}), ("b", {"i": 2})]
+    assert LoopPolicy().check(_state_with(actions)).stop_reason == StopReason.CYCLE_DETECTED
+
+    off = LoopPolicy(replace(LoopConfig(), cycle_detect_window=0,
+                             repeat_action_threshold=10 ** 9, stall_threshold=10 ** 9,
+                             reflect_on_consecutive_failures=10 ** 9))
+    assert off.check(_state_with(actions)).action == "continue"
 
 
 def test_budget_guards_stop_on_each_limit():

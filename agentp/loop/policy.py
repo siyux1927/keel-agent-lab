@@ -138,7 +138,12 @@ class LoopPolicy:
         跟"重复"分开处理: 周期性振荡通常意味着模型在两个错误假设之间来回横跳,
         反思几乎救不回来, 直接停更划算。
         """
-        fps = state.fingerprints()[-self.cfg.cycle_detect_window:]
+        window = self.cfg.cycle_detect_window
+        # 必须显式判 <=0。踩过的坑: 想用 window=0 关掉这个检测器, 结果 fps[-0:]
+        # 等价于 fps[0:] —— 取的是**全部**历史而不是空列表, 检测器反而变成了无限窗口。
+        if window <= 0:
+            return GuardDecision()
+        fps = state.fingerprints()[-window:]
         n = len(fps)
         if n < 4:
             return GuardDecision()
