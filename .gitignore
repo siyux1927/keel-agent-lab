@@ -13,8 +13,14 @@ htmlcov/
 data/*
 !data/.gitkeep
 
+# CI 每次自己跑实验并发布, 不需要把产物提交进来。
+# 唯一进版本库的实验结果是 README 里那段带时间戳的注入快照。
+site/
+docs/BENCH.md
+
 .idea/
 .vscode/
 .DS_Store
 面试准备.md
+
 image.png

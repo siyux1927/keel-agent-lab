@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from agentp.orchestrator import (
+from keel.orchestrator import (
     CycleError,
     DAGRunner,
     NodeStatus,
@@ -178,7 +178,7 @@ async def test_orchestrator_falls_back_to_direct_for_simple_goal(memory):
 async def test_orchestrator_records_skill(memory):
     orchestrator = Orchestrator(memory=memory)
     await orchestrator.run("查一下发布规定; 再计算 2+2", session_id="o3")
-    from agentp.memory import MemoryLayer
+    from keel.memory import MemoryLayer
 
     assert memory.store.all(MemoryLayer.PROCEDURAL)
 

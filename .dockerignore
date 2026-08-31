@@ -1,0 +1,15 @@
+.git
+.github
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.vscode
+tests
+docs
+site
+data/bench
+image.png
+DEV_SKILL.md
+.env

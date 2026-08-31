@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agentp"
+name = "keel"
 version = "0.1.0"
 description = "Agent 运行时: 上下文工程 / 记忆系统 / Loop Engineering / 多 Agent 编排"
 requires-python = ">=3.10"
@@ -19,13 +19,17 @@ dev = ["pytest>=8.3", "pytest-asyncio>=0.25"]
 accurate-tokens = ["tiktoken>=0.8"]
 
 [tool.setuptools.packages.find]
-include = ["agentp*"]
+include = ["keel*"]
 
 [tool.setuptools.package-data]
-"agentp.server" = ["static/*"]
+"keel.server" = ["static/*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 addopts = "-q --tb=short"
+# 没有这行, 裸跑 `pytest` 会 ModuleNotFoundError: No module named 'keel' ——
+# prepend 模式只把 tests/ 放进 sys.path, 根目录得靠 `python -m pytest` 顺带加,
+# 两种调用方式行为不一致, 而 README 和 CI 用的恰好是裸 pytest。
+pythonpath = ["."]

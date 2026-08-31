@@ -6,9 +6,9 @@ import asyncio
 
 import pytest
 
-from agentp.observability.trace import Tracer, use_tracer
-from agentp.tools import get_registry
-from agentp.util import (
+from keel.observability.trace import Tracer, use_tracer
+from keel.tools import get_registry
+from keel.util import (
     BM25,
     cosine,
     count_tokens,
@@ -209,7 +209,7 @@ async def test_concurrent_spans_do_not_corrupt_parentage():
 
 
 async def test_event_bus_streams_and_terminates():
-    from agentp.observability.events import EventBus
+    from keel.observability.events import EventBus
 
     bus = EventBus()
     queue = bus.register()
@@ -222,7 +222,7 @@ async def test_event_bus_streams_and_terminates():
 
 async def test_event_bus_drops_instead_of_blocking():
     """消费者跟不上时宁可丢展示事件, 也不能拖慢推理主循环。"""
-    from agentp.observability.events import EventBus
+    from keel.observability.events import EventBus
 
     bus = EventBus(maxsize=2)
     bus.register()

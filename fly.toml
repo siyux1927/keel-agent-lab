@@ -1,0 +1,34 @@
+# Fly.io 部署配置。首次部署:
+#   fly launch --no-deploy --copy-config && fly deploy
+#
+# 选 Fly 的理由是它支持缩容到零: 演示站大部分时间没人访问, auto_stop_machines
+# 让它在闲置时不占资源, 有请求再冷启。代价是首次访问会多等一两秒。
+
+app = "keel-demo"
+primary_region = "nrt"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  KEEL_PUBLIC_MODE = "true"
+  KEEL_PROVIDER = "mock"
+  KEEL_RATE_LIMIT = "20"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    # 一次编排请求要跑十几次模型调用, 并发放太高会让所有人都变慢。
+    # 宁可排队也不要一起卡住。
+    soft_limit = 8
+    hard_limit = 16
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

@@ -151,6 +151,30 @@ def main() -> int:
     check("POST /api/memory/decay", "archived" in call("/api/memory/decay", {}))
     check("POST /api/memory/reflect", "insights" in call("/api/memory/reflect?session_id=smoke", {}))
 
+    print("\n[消融实验]")
+    hist = call("/api/bench/history?limit=40")
+    check("GET /api/bench/history", "runs" in hist and "can_run" in hist,
+          f"留档 {len(hist['runs'])} 次 / {len(hist['metric_names'])} 项指标")
+
+    if hist["can_run"]:
+        # 只跑 dag 这一组: 它是六组里最快的, 冒烟要验的是「链路通不通」而不是「实验准不准」
+        events = sse("/api/bench/stream?group=dag", limit=600)
+        kinds = [e.get("type") for e in events]
+        check("SSE 实验流式执行", "start" in kinds and "log" in kinds,
+              f"{len(events)} 个事件")
+        done = next((e for e in events if e.get("type") == "done"), None)
+        check("实验完成并留档", done is not None,
+              f"file={done['file']}" if done else "未收到 done")
+        if done:
+            check("产出带方向的指标", all(
+                m.get("goal") in ("lower", "higher", "info") for m in done["metrics"].values()),
+                f"{len(done['metrics'])} 项")
+            after = call("/api/bench/history?limit=40")
+            check("历史记录随之增长", len(after["runs"]) > len(hist["runs"]),
+                  f"{len(hist['runs'])} → {len(after['runs'])}")
+    else:
+        check("公网模式下实验触发被拒绝", True, "can_run=false，符合预期")
+
     print(f"\n{'=' * 60}\n  通过 {passed} 项, 失败 {failed} 项\n{'=' * 60}")
     return 1 if failed else 0
 

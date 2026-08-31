@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Keel · Agent 运行时控制台</title>
+<style>
+  :root{
+    --bg:#0b0f17; --panel:#121826; --panel2:#182031; --line:#243044;
+    --text:#e6edf7; --muted:#8b9ab3; --accent:#5b9cff; --ok:#3ecf8e;
+    --warn:#f0b429; --err:#ff6b6b; --purple:#b57bff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:14px/1.6 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  header{display:flex;align-items:center;gap:16px;padding:14px 22px;
+    border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:10}
+  .logo{font-weight:700;font-size:17px;letter-spacing:.3px}
+  .logo span{color:var(--accent)}
+  .badge{font-size:12px;padding:3px 9px;border-radius:999px;background:var(--panel2);
+    border:1px solid var(--line);color:var(--muted)}
+  .badge.on{color:var(--ok);border-color:#1e5c44}
+  nav{display:flex;gap:4px;padding:0 22px;border-bottom:1px solid var(--line);background:var(--panel)}
+  nav button{background:none;border:none;color:var(--muted);padding:11px 16px;cursor:pointer;
+    font-size:14px;border-bottom:2px solid transparent}
+  nav button:hover{color:var(--text)}
+  nav button.active{color:var(--accent);border-bottom-color:var(--accent)}
+  main{padding:20px 22px;max-width:1500px;margin:0 auto}
+  .view{display:none} .view.active{display:block}
+  .grid{display:grid;gap:16px}
+  .g2{grid-template-columns:1.35fr 1fr}
+  @media(max-width:1100px){.g2{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+  .card h3{margin:0 0 12px;font-size:14px;color:var(--muted);font-weight:600;
+    text-transform:uppercase;letter-spacing:.6px}
+  textarea,input,select{width:100%;background:var(--panel2);border:1px solid var(--line);
+    color:var(--text);border-radius:8px;padding:10px 12px;font-size:14px;font-family:inherit}
+  textarea{resize:vertical;min-height:72px}
+  button.act{background:var(--accent);border:none;color:#06101f;font-weight:600;
+    padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px}
+  button.act:hover{filter:brightness(1.1)}
+  button.act:disabled{opacity:.5;cursor:not-allowed}
+  button.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--text);
+    padding:8px 14px;border-radius:8px;cursor:pointer}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .stream{max-height:560px;overflow:auto;font-size:13px}
+  .ev{border-left:2px solid var(--line);padding:7px 0 7px 12px;margin:6px 0}
+  .ev .t{color:var(--muted);font-size:11.5px;letter-spacing:.4px;text-transform:uppercase}
+  .ev.thought{border-color:var(--accent)} .ev.tool{border-color:var(--warn)}
+  .ev.guard{border-color:var(--err)} .ev.reflect{border-color:var(--purple)}
+  .ev.done{border-color:var(--ok)} .ev.ctx{border-color:#3a4a66}
+  pre{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:12px;
+    overflow:auto;font-size:12px;max-height:420px;margin:0;
+    font-family:"JetBrains Mono",Consolas,monospace;white-space:pre-wrap;word-break:break-word}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:13px}
+  .kv b{color:var(--muted);font-weight:500}
+  .bar{height:8px;background:var(--panel2);border-radius:4px;overflow:hidden;margin:4px 0}
+  .bar i{display:block;height:100%;background:var(--accent)}
+  .bar i.over{background:var(--err)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:500;font-size:12px}
+  .tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:4px;
+    background:var(--panel2);border:1px solid var(--line);color:var(--muted)}
+  .tag.ok{color:var(--ok)} .tag.err{color:var(--err)} .tag.warn{color:var(--warn)}
+  .answer{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--ok);
+    border-radius:8px;padding:14px;white-space:pre-wrap;font-size:14px}
+  .muted{color:var(--muted)} .small{font-size:12px}
+  .tree{font-family:Consolas,monospace;font-size:12px}
+  .tree .node{padding:2px 0}
+  .empty{color:var(--muted);text-align:center;padding:32px;font-size:13px}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Ke<span>el</span></div>
+  <span class="badge" id="b-provider">provider …</span>
+  <span class="badge" id="b-mem">memory …</span>
+  <span class="badge" id="b-cost">cost $0</span>
+  <div style="flex:1"></div>
+  <span class="badge small">上下文工程 · 记忆 · Loop Engineering · 编排</span>
+</header>
+
+<nav>
+  <button class="active" data-v="chat">对话 / 执行</button>
+  <button data-v="trace">调用链追踪</button>
+  <button data-v="memory">记忆浏览器</button>
+  <button data-v="ctxlab">上下文实验室</button>
+  <button data-v="chunklab">切片实验室</button>
+  <button data-v="bench">消融实验</button>
+</nav>
+
+<main>
+  <!-- ================= 对话 ================= -->
+  <section class="view active" id="v-chat">
+    <div class="grid g2">
+      <div class="card">
+        <h3>任务执行</h3>
+        <textarea id="msg" placeholder="例如: 查一下知识库里的发布窗口规定; 同时搜索 ReAct 论文的核心思想; 然后计算 (99+1)*3"></textarea>
+        <div class="row" style="margin-top:10px">
+          <select id="mode" style="width:190px">
+            <option value="react">ReAct 单智能体</option>
+            <option value="orchestrate">DAG 多智能体编排</option>
+          </select>
+          <input id="sid" value="default" style="width:130px" placeholder="session" />
+          <button class="act" id="go">执行</button>
+          <button class="ghost" id="clear">清空</button>
+        </div>
+        <div class="row small muted" style="margin-top:10px">
+          护栏演示:
+          <button class="ghost small" onclick="preset('死循环演示 请反复确认当前时间')">死循环检测</button>
+          <button class="ghost small" onclick="preset('熔断演示 调用不稳定服务取数据')">熔断降级</button>
+          <button class="ghost small" onclick="preset('帮我算一下 (128*7+56)/4, 再查一下知识库的发布窗口')">多工具协作</button>
+        </div>
+        <div id="stream" class="stream" style="margin-top:14px"></div>
+      </div>
+      <div class="card">
+        <h3>最终答案</h3>
+        <div id="answer" class="answer muted">尚未执行</div>
+        <h3 style="margin-top:18px">运行指标</h3>
+        <div class="kv" id="metrics"><b>状态</b><span class="muted">—</span></div>
+        <h3 style="margin-top:18px">上下文预算占用</h3>
+        <div id="zones" class="small muted">执行后显示各分区 token 分配</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 追踪 ================= -->
+  <section class="view" id="v-trace">
+    <div class="card">
+      <div class="row"><h3 style="margin:0;flex:1">Trace 列表</h3>
+        <button class="ghost" onclick="loadTraces()">刷新</button></div>
+      <table style="margin-top:10px"><thead><tr>
+        <th>Trace</th><th>名称</th><th>Spans</th><th>LLM</th><th>Tool</th>
+        <th>Tokens</th><th>成本</th><th>错误</th></tr></thead>
+        <tbody id="trace-rows"><tr><td colspan="8" class="empty">暂无数据</td></tr></tbody></table>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>Span 树</h3>
+      <div id="trace-tree" class="tree"><div class="empty">点击上方任一 trace 查看</div></div>
+    </div>
+  </section>
+
+  <!-- ================= 记忆 ================= -->
+  <section class="view" id="v-memory">
+    <div class="grid g2">
+      <div class="card">
+        <h3>知识入库(演示切片 → 向量化 → 语义记忆)</h3>
+        <textarea id="doc" rows="8" placeholder="粘贴 Markdown 文档..."></textarea>
+        <div class="row" style="margin-top:10px">
+          <select id="doc-strategy" style="width:170px">
+            <option value="structure">structure 结构感知</option>
+            <option value="recursive">recursive 递归</option>
+            <option value="semantic">semantic 语义</option>
+            <option value="hierarchical">hierarchical 分层</option>
+            <option value="fixed">fixed 定长</option>
+          </select>
+          <input id="doc-source" value="handbook.md" style="width:150px" />
+          <button class="act" id="ingest">入库</button>
+        </div>
+        <div id="ingest-out" class="small muted" style="margin-top:10px"></div>
+      </div>
+      <div class="card">
+        <h3>混合检索(向量 + BM25 + 新鲜度 + 重要性)</h3>
+        <div class="row"><input id="mq" placeholder="检索问题" style="flex:1" />
+          <button class="act" id="msearch">检索</button></div>
+        <div id="msearch-out" style="margin-top:12px"></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <div class="row"><h3 style="margin:0;flex:1">四层记忆</h3>
+        <button class="ghost" onclick="loadMemory()">刷新</button>
+        <button class="ghost" onclick="post('/api/memory/decay').then(r=>{alert('已归档 '+r.archived+' 条低强度记忆');loadMemory()})">触发遗忘</button>
+        <button class="ghost" onclick="post('/api/memory/reflect?session_id='+sid.value).then(r=>{alert(JSON.stringify(r.insights||[],null,1));loadMemory()})">强制反思固化</button>
+      </div>
+      <div id="mem-out" style="margin-top:12px"><div class="empty">点击刷新加载</div></div>
+    </div>
+  </section>
+
+  <!-- ================= 上下文实验室 ================= -->
+  <section class="view" id="v-ctxlab">
+    <div class="card">
+      <h3>上下文组装可视化 —— 看清楚模型到底收到了什么</h3>
+      <div class="row">
+        <input id="ctx-task" placeholder="任务描述" style="flex:1"
+          value="总结知识库里关于发布流程和上下文预算的规定" />
+        <input id="ctx-window" type="number" value="8192" style="width:120px" title="上下文窗口" />
+        <button class="act" id="ctx-run">组装</button>
+      </div>
+      <div class="small muted" style="margin-top:8px">
+        调小上下文窗口(比如 1500), 可以直接观察低优先级分区被丢弃、高优先级分区被压缩的过程。
+      </div>
+    </div>
+    <div class="grid g2" style="margin-top:16px">
+      <div class="card"><h3>预算分配</h3><div id="ctx-budget"><div class="empty">待组装</div></div></div>
+      <div class="card"><h3>检索来源(provenance)</h3><div id="ctx-prov"><div class="empty">待组装</div></div></div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>最终送入模型的消息</h3><pre id="ctx-msgs">待组装</pre>
+    </div>
+  </section>
+
+  <!-- ================= 切片实验室 ================= -->
+  <section class="view" id="v-chunklab">
+    <div class="card">
+      <h3>五种切片策略并排对比</h3>
+      <textarea id="ck-text" rows="8" placeholder="粘贴一段文档..."></textarea>
+      <div class="row" style="margin-top:10px">
+        <label class="small muted">块大小</label>
+        <input id="ck-size" type="number" value="220" style="width:100px" />
+        <label class="small muted">重叠</label>
+        <input id="ck-overlap" type="number" value="40" style="width:100px" />
+        <button class="act" id="ck-run">对比</button>
+        <button class="ghost" id="ck-sample">填充示例文本</button>
+      </div>
+    </div>
+    <div id="ck-out" style="margin-top:16px"></div>
+  </section>
+
+  <!-- ================= 消融实验 ================= -->
+  <section class="view" id="v-bench">
+    <div class="card">
+      <h3>A/B 消融实验</h3>
+      <div class="small muted" style="margin-bottom:12px">
+        每个机制都做关/开对照，用数据回答「这套护栏到底有没有用」。
+        指标自带方向（越小越好 / 越大越好 / 仅参考），历次结果留档，可以看出某次改动让哪个指标变差了。
+      </div>
+      <div class="row">
+        <label class="small muted">实验组</label>
+        <select id="bn-group" style="width:220px">
+          <option value="all">全部六组（约 30 秒）</option>
+          <option value="guard">护栏 A/B</option>
+          <option value="breaker">工具熔断器</option>
+          <option value="mmr">MMR 去冗余</option>
+          <option value="budget">预算调度 + 压缩</option>
+          <option value="digest">动作清单注入</option>
+          <option value="dag">DAG 并发编排</option>
+        </select>
+        <button class="act" id="bn-run">开始实验</button>
+        <button class="ghost" id="bn-refresh">刷新历史</button>
+        <span class="small muted" id="bn-status"></span>
+      </div>
+    </div>
+
+    <div class="grid g2" style="margin-top:16px">
+      <div class="card">
+        <h3>最近一次的指标</h3>
+        <div id="bn-metrics"><div class="empty">尚无实验记录</div></div>
+      </div>
+      <div class="card">
+        <h3>执行日志</h3>
+        <pre id="bn-log" style="max-height:520px">点击「开始实验」后在此实时输出</pre>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h3>指标趋势（按 commit 演进）</h3>
+      <div class="small muted" style="margin-bottom:10px">
+        只画有方向的指标。绿点表示比上一次更好，红点表示更差。
+        墙钟耗时这类仅参考指标不画——它受机器负载影响，画出来只会制造噪声。
+      </div>
+      <div id="bn-trend"><div class="empty">至少需要两次实验记录才能画趋势</div></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s??'').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const num = n => (n??0).toLocaleString();
+
+async function get(u){ const r = await fetch(u); if(!r.ok) throw new Error(await r.text()); return r.json(); }
+async function post(u, body){
+  const r = await fetch(u, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: body?JSON.stringify(body):undefined});
+  if(!r.ok) throw new Error(await r.text()); return r.json();
+}
+
+/* ---------- 导航 ---------- */
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active'); $('#v'+'-'+b.dataset.v).classList.add('active');
+  if(b.dataset.v==='trace') loadTraces();
+  if(b.dataset.v==='memory') loadMemory();
+  if(b.dataset.v==='bench') loadBench();
+});
+
+/* ---------- 顶栏 ---------- */
+async function loadHealth(){
+  try{
+    const h = await get('/api/health');
+    const el = $('#b-provider');
+    el.textContent = h.provider + ' · ' + h.model + (h.offline_mode ? ' (离线)' : ' (在线)');
+    el.className = 'badge' + (h.offline_mode ? '' : ' on');
+    $('#b-mem').textContent = '记忆 ' + h.memory.active + '/' + h.memory.total;
+  }catch(e){ $('#b-provider').textContent = '服务未就绪'; }
+}
+loadHealth(); setInterval(loadHealth, 15000);
+
+function preset(t){ $('#msg').value = t; }
+
+/* ---------- 对话流 ---------- */
+let source = null;
+$('#clear').onclick = ()=>{ $('#stream').innerHTML=''; $('#answer').textContent='尚未执行';
+  $('#answer').className='answer muted'; $('#metrics').innerHTML=''; $('#zones').textContent=''; };
+
+$('#go').onclick = ()=>{
+  const msg = $('#msg').value.trim(); if(!msg) return;
+  if(source) source.close();
+  $('#stream').innerHTML=''; $('#go').disabled=true;
+  $('#answer').textContent='执行中…'; $('#answer').className='answer muted';
+  const url = `/api/chat/stream?message=${encodeURIComponent(msg)}&session_id=${encodeURIComponent($('#sid').value)}&mode=${$('#mode').value}`;
+  source = new EventSource(url);
+  source.onmessage = e => { try{ render(JSON.parse(e.data)); }catch(err){} };
+  source.onerror = ()=>{ source.close(); $('#go').disabled=false; };
+};
+
+function add(cls, title, body){
+  const d = document.createElement('div');
+  d.className = 'ev ' + cls;
+  d.innerHTML = `<div class="t">${esc(title)}</div>${body?`<div>${body}</div>`:''}`;
+  $('#stream').appendChild(d); $('#stream').scrollTop = 1e9;
+}
+
+function render(e){
+  switch(e.type){
+    case 'agent.start':
+      add('', '开始执行 · session ' + esc(e.session_id), '<span class="muted small">'+esc(e.goal)+'</span>'); break;
+    case 'orchestrator.start': add('', '编排启动', '<span class="muted small">'+esc(e.goal)+'</span>'); break;
+    case 'skill.recalled':
+      add('reflect', '召回程序性记忆', `<span class="small">匹配「${esc(e.pattern)}」胜率 ${Math.round((e.win_rate||0)*100)}% · 路径 ${esc((e.steps||[]).join(' → '))}</span>`); break;
+    case 'plan.ready':
+      add('', '规划完成 · ' + (e.nodes||[]).length + ' 个子任务',
+        '<pre class="small">' + esc((e.nodes||[]).map(n=>`${n.id} ${n.title}  deps=[${n.depends_on}]`).join('\n')) + '</pre>'); break;
+    case 'dag.start':
+      add('', `DAG 调度 · ${e.nodes} 节点 / ${e.levels} 层`,
+        '<span class="small muted">并发层: ' + esc(JSON.stringify(e.plan)) + '</span>'); break;
+    case 'dag.node':
+      add('tool', `节点 ${esc(e.id)} · ${esc(e.status)}`,
+        `<span class="small muted">${esc(e.title||'')} ${e.duration_ms?`· ${e.duration_ms}ms`:''} ${esc(e.error||'')}</span>`); break;
+    case 'dag.finish':
+      add('done', 'DAG 完成', `<span class="small">完成 ${e.done} · 失败 ${e.failed} · 跳过 ${e.skipped} · 并发加速 <b>${e.speedup}×</b> (串行 ${e.serial_ms}ms → 实际 ${e.wall_ms}ms)</span>`); break;
+    case 'context.built':
+      add('ctx', `第 ${e.index+1} 步 · 上下文 ${num(e.tokens)} tokens`,
+        '<span class="small muted">' + esc(Object.entries(e.zones||{}).filter(([,v])=>v>0).map(([k,v])=>`${k}:${v}`).join('  ')) + '</span>');
+      renderZones(e.zones); break;
+    case 'thought': add('thought','思考','<span class="small">'+esc(e.text)+'</span>'); break;
+    case 'tool.start': add('tool','调用 '+esc(e.tool),'<span class="small muted">'+esc(JSON.stringify(e.args))+'</span>'); break;
+    case 'tool.end':
+      add('tool', (e.ok?'✓ ':'✗ ')+esc(e.tool)+` · ${e.latency_ms}ms`,
+        '<span class="small muted">'+esc(e.preview)+'</span>'); break;
+    case 'tool.blocked': add('guard','动作被拦截 · '+esc(e.tool),'<span class="small">该动作已被反思判定无效</span>'); break;
+    case 'guard':
+      add('guard', '护栏触发 · ' + esc(e.action), '<span class="small">'+esc(e.reason)+'</span>'); break;
+    case 'reflect':
+      add('reflect','反思重规划 #'+e.replans,
+        `<div class="small">诊断: ${esc(e.diagnosis)}</div><div class="small muted">新计划: ${esc((e.new_plan||[]).join(' / '))}</div>`); break;
+    case 'verify.rejected':
+      add('guard','自检未通过','<span class="small">'+esc((e.issues||[]).join('; '))+'</span>'); break;
+    case 'critic.verdict':
+      add(e.accepted?'done':'guard', `质检第 ${e.round} 轮 · ${e.accepted?'通过':'打回'} (${e.score})`,
+        '<span class="small muted">'+esc((e.issues||[]).join('; ')||e.suggestion||'')+'</span>'); break;
+    case 'memory.reflected':
+      add('reflect','记忆固化', '<span class="small">'+esc((e.insights||[]).join(' / '))+'</span>'); break;
+    case 'answer.degraded': add('guard','降级作答','<span class="small">'+esc(e.reason)+'</span>'); break;
+    case 'agent.finish': case 'orchestrator.finish': finish(e); break;
+    case 'error': add('guard','错误', '<span class="small">'+esc(e.error)+'</span>'); $('#go').disabled=false; break;
+    case 'done': $('#go').disabled=false; if(source) source.close(); loadHealth(); break;
+  }
+}
+
+function finish(e){
+  $('#answer').textContent = e.answer || '(无答案)';
+  $('#answer').className = 'answer';
+  const u = e.usage || {};
+  $('#b-cost').textContent = 'cost $' + (u.cost_usd||0).toFixed(4);
+  const rows = [
+    ['状态', e.status || e.mode || '完成'],
+    ['终止原因', e.stop_reason || '目标达成'],
+    ['LLM 调用', num(u.llm_calls)],
+    ['工具调用', num(u.tool_calls)],
+    ['Prompt tokens', num(u.prompt_tokens)],
+    ['Completion tokens', num(u.completion_tokens)],
+    ['成本(USD)', (u.cost_usd||0).toFixed(6)],
+    ['耗时', Math.round(u.wall_ms||0)+' ms'],
+    ['错误 span', num(u.errors)],
+  ];
+  if(e.speedup) rows.push(['并发加速比', e.speedup+'×']);
+  $('#metrics').innerHTML = rows.map(([k,v])=>`<b>${k}</b><span>${esc(v)}</span>`).join('');
+  add('done','执行结束','');
+}
+
+function renderZones(zones){
+  if(!zones) return;
+  const total = Object.values(zones).reduce((a,b)=>a+b,0) || 1;
+  $('#zones').innerHTML = Object.entries(zones).filter(([,v])=>v>0)
+    .sort((a,b)=>b[1]-a[1]).map(([k,v])=>
+      `<div style="margin-bottom:6px"><div class="row small"><span style="flex:1">${k}</span>
+      <span class="muted">${num(v)}</span></div>
+      <div class="bar"><i style="width:${(v/total*100).toFixed(1)}%"></i></div></div>`).join('');
+}
+
+/* ---------- Trace ---------- */
+async function loadTraces(){
+  const d = await get('/api/traces?limit=25');
+  const rows = d.traces.map(t=>{
+    const u = t.totals;
+    return `<tr style="cursor:pointer" onclick="loadTree('${t.trace_id}')">
+      <td class="small muted">${t.trace_id.slice(-8)}</td><td>${esc(t.name)}</td>
+      <td>${u.spans}</td><td>${u.llm_calls}</td><td>${u.tool_calls}</td>
+      <td>${num(u.total_tokens)}</td><td>$${(u.cost_usd||0).toFixed(5)}</td>
+      <td>${u.errors? `<span class="tag err">${u.errors}</span>`:'<span class="tag ok">0</span>'}</td></tr>`;
+  }).join('');
+  $('#trace-rows').innerHTML = rows || '<tr><td colspan="8" class="empty">暂无数据</td></tr>';
+}
+async function loadTree(id){
+  const d = await get('/api/trace/'+id);
+  const walk = (nodes, depth=0) => nodes.map(n=>{
+    const pad = '&nbsp;'.repeat(depth*3);
+    const cls = n.status==='error'?'err':(n.kind==='llm'?'warn':'ok');
+    const tok = (n.prompt_tokens+n.completion_tokens) || 0;
+    return `<div class="node">${pad}<span class="tag ${cls}">${n.kind}</span> ${esc(n.name)}
+      <span class="muted">${n.duration_ms}ms${tok?` · ${num(tok)}tok`:''}${n.error?` · ${esc(n.error)}`:''}</span></div>`
+      + walk(n.children||[], depth+1);
+  }).join('');
+  $('#trace-tree').innerHTML = walk(d.tree);
+}
+
+/* ---------- 记忆 ---------- */
+$('#ingest').onclick = async ()=>{
+  const text = $('#doc').value.trim(); if(!text) return;
+  const r = await post('/api/memory/ingest', {text, source:$('#doc-source').value, strategy:$('#doc-strategy').value});
+  $('#ingest-out').innerHTML = `已索引 <b>${r.indexed}</b> 个块 · 策略 ${r.strategy} · `
+    + `平均 ${r.chunk_stats.avg_tokens} tokens (min ${r.chunk_stats.min_tokens} / max ${r.chunk_stats.max_tokens} / 标准差 ${r.chunk_stats.std_tokens})`;
+  loadMemory(); loadHealth();
+};
+$('#msearch').onclick = async ()=>{
+  const q = $('#mq').value.trim(); if(!q) return;
+  const d = await get('/api/memory/search?query='+encodeURIComponent(q)+'&top_k=6');
+  $('#msearch-out').innerHTML = d.results.length ? `<table><thead><tr>
+    <th>层</th><th>内容</th><th>总分</th><th>向量</th><th>BM25</th><th>新鲜度</th><th>重要性</th></tr></thead><tbody>`
+    + d.results.map(r=>`<tr><td><span class="tag">${r.layer}</span></td>
+      <td class="small">${esc(r.content.slice(0,140))}</td>
+      <td><b>${r.score.toFixed(3)}</b></td><td>${(r.breakdown.vector??0).toFixed(3)}</td>
+      <td>${(r.breakdown.bm25??0).toFixed(3)}</td><td>${(r.breakdown.recency??0).toFixed(3)}</td>
+      <td>${(r.breakdown.importance??0).toFixed(3)}</td></tr>`).join('')
+    + '</tbody></table>' : '<div class="empty">无结果</div>';
+};
+async function loadMemory(){
+  const d = await get('/api/memory?session_id='+encodeURIComponent($('#sid').value)+'&limit=100');
+  const names = {working:'工作记忆(近期对话)', episodic:'情景记忆(事件流)',
+    semantic:'语义记忆(事实/文档块)', procedural:'程序性记忆(技能)'};
+  $('#mem-out').innerHTML = Object.entries(d.by_layer).map(([layer, items])=>{
+    const st = d.stats.by_layer[layer] || {};
+    return `<div style="margin-bottom:18px"><div class="row">
+      <b>${names[layer]||layer}</b>
+      <span class="tag">活跃 ${st.active??items.length}</span>
+      <span class="tag">归档 ${st.archived??0}</span>
+      <span class="tag">平均强度 ${st.avg_strength??'-'}</span></div>`
+      + (items.length ? `<table style="margin-top:6px"><thead><tr><th>内容</th><th>重要性</th>
+        <th>强度</th><th>命中</th><th>来源</th></tr></thead><tbody>`
+        + items.slice(0,12).map(m=>`<tr><td class="small">${esc((m.content||'').slice(0,160))}
+          ${m.archived?'<span class="tag err">已归档</span>':''}</td>
+          <td>${m.importance??'-'}</td><td>${m.strength??'-'}</td>
+          <td>${m.access_count??0}</td><td class="small muted">${esc(m.source||'')}</td></tr>`).join('')
+        + '</tbody></table>' : '<div class="small muted" style="padding:8px 0">空</div>') + '</div>';
+  }).join('');
+}
+
+/* ---------- 上下文实验室 ---------- */
+$('#ctx-run').onclick = async ()=>{
+  const d = await post('/api/lab/context', {task: $('#ctx-task').value,
+    session_id: $('#sid').value, context_window: parseInt($('#ctx-window').value)||8192});
+  const b = d.budget;
+  $('#ctx-budget').innerHTML = `<div class="kv">
+      <b>可用预算</b><span>${num(b.total_budget)} tokens</span>
+      <b>实际占用</b><span>${num(b.granted_total)} (利用率 ${(b.utilization*100).toFixed(1)}%)</span>
+      <b>原始需求</b><span>${num(b.requested_total)} (压力 ${(b.pressure*100).toFixed(0)}%)</span>
+      <b>注水轮次</b><span>${b.rounds}</span></div>
+    <table style="margin-top:10px"><thead><tr><th>分区</th><th>需求</th><th>分配</th>
+      <th>处理</th></tr></thead><tbody>` +
+    b.zones.map(z=>{
+      const r = d.zones[z.name]||{};
+      const state = z.dropped ? '<span class="tag err">整块丢弃</span>'
+        : (z.needs_compression ? `<span class="tag warn">${esc(r.method||'压缩')}</span>`
+        : '<span class="tag ok">原样</span>');
+      return `<tr><td>${z.name}</td><td>${num(z.requested)}</td><td>${num(z.granted)}</td>
+        <td>${state} <span class="small muted">${esc(z.reason||'')}</span></td></tr>`;
+    }).join('') + '</tbody></table>';
+
+  $('#ctx-prov').innerHTML = d.retrieved_items.length ? `<table><thead><tr>
+    <th>分区</th><th>来源</th><th>分数</th><th>tokens</th><th>内容</th></tr></thead><tbody>`
+    + d.retrieved_items.map(i=>`<tr><td><span class="tag">${i.zone}</span></td>
+      <td class="small">${esc(i.source)}</td><td>${i.score.toFixed(3)}</td><td>${i.tokens}</td>
+      <td class="small muted">${esc(i.text.slice(0,110))}</td></tr>`).join('')
+    + '</tbody></table>' : '<div class="empty">当前会话没有可召回的记忆, 先去「记忆浏览器」入库一些文档</div>';
+
+  $('#ctx-msgs').textContent = d.messages.map(m =>
+    `───── [${m.meta.zone||m.role}] role=${m.role} ─────\n${m.content}`).join('\n\n');
+};
+
+/* ---------- 切片实验室 ---------- */
+const SAMPLE = `# Agent 系统设计手册
+
+## 一、上下文工程
+上下文窗口是智能体最稀缺的资源。切片策略决定了检索质量的上限, 切错了后面再好的向量模型也救不回来。
+定长切片实现最简单, 但会把句子拦腰砍断, 导致块内语义不完整。
+递归切片按分隔符优先级下切, 是通用场景的默认选择。
+
+### 1.1 预算调度
+预算分配应当建模为带下界和优先级的资源分配问题, 而不是简单的先到先得。
+系统默认上下文窗口 8192 tokens, 输出预留 1024 tokens, 安全边界 5%。
+
+\`\`\`python
+def allocate(zones, budget):
+    # 先满足保命线, 再按权重注水
+    return plan
+\`\`\`
+
+## 二、记忆系统
+记忆分为工作记忆、情景记忆、语义记忆和程序性记忆四层。
+遗忘曲线控制记忆强度随时间衰减, 半衰期默认 72 小时。
+被检索命中相当于一次复习, 会重置衰减计时。
+
+## 三、循环工程
+ReAct 循环必须配备预算护栏、死循环检测和熔断器。
+反思机制在连续失败两次后触发, 产出会写入动作黑名单。
+周期振荡通常意味着模型在两个错误假设之间横跳, 反思救不回来, 应当直接终止。`;
+
+$('#ck-sample').onclick = ()=>{ $('#ck-text').value = SAMPLE; };
+$('#ck-run').onclick = async ()=>{
+  const text = $('#ck-text').value.trim(); if(!text) return;
+  const d = await post('/api/lab/chunk', {text, chunk_tokens: parseInt($('#ck-size').value)||220,
+    overlap: parseInt($('#ck-overlap').value)||40});
+  $('#ck-out').innerHTML = Object.entries(d.strategies).map(([name, r])=>{
+    const s = r.stats;
+    return `<div class="card" style="margin-bottom:14px">
+      <div class="row"><b style="font-size:15px">${name}</b>
+        <span class="tag">${s.count} 块</span>
+        <span class="tag">平均 ${s.avg_tokens} tok</span>
+        <span class="tag">范围 ${s.min_tokens}–${s.max_tokens}</span>
+        <span class="tag ${s.std_tokens > s.avg_tokens*0.5 ? 'warn':'ok'}">标准差 ${s.std_tokens}</span>
+        ${s.parents?`<span class="tag">父块 ${s.parents} / 子块 ${s.children}</span>`:''}</div>
+      <table style="margin-top:8px"><thead><tr><th>#</th><th>tokens</th><th>标题路径</th>
+        <th>预览</th></tr></thead><tbody>`
+      + r.chunks.map(c=>`<tr><td>${c.index}</td><td>${c.tokens}</td>
+        <td class="small muted">${esc(c.title)}${c.parent_id?' <span class="tag">child</span>':''}</td>
+        <td class="small">${esc(c.preview)}</td></tr>`).join('')
+      + '</tbody></table></div>';
+  }).join('');
+};
+
+/* ---------- 消融实验 ---------- */
+let benchRuns = [];
+const GOAL_LABEL = {lower:'越小越好', higher:'越大越好', info:'仅参考'};
+
+async function loadBench(){
+  const d = await get('/api/bench/history?limit=40');
+  benchRuns = d.runs || [];
+  $('#bn-run').disabled = !d.can_run;
+  $('#bn-status').textContent = d.can_run
+    ? `已留档 ${benchRuns.length} 次`
+    : '公开演示站不开放实验触发，以下为历史留档';
+  renderBenchMetrics();
+  renderBenchTrend();
+}
+
+function renderBenchMetrics(){
+  const latest = benchRuns[0];
+  if(!latest){ $('#bn-metrics').innerHTML = '<div class="empty">尚无实验记录</div>'; return; }
+  const prev = benchRuns[1];
+  const m = latest.meta || {};
+  const rows = Object.entries(latest.metrics).map(([name, v])=>{
+    const before = prev && prev.metrics[name];
+    let delta = '<span class="muted">—</span>';
+    if(before && v.goal !== 'info' && before.value !== v.value){
+      const better = v.goal === 'lower' ? v.value < before.value : v.value > before.value;
+      const pctText = before.value === 0
+        ? (v.value - before.value).toFixed(2)
+        : ((v.value - before.value) / Math.abs(before.value) * 100).toFixed(1) + '%';
+      delta = `<span class="tag ${better?'ok':'err'}">${pctText}</span>`;
+    }
+    return `<tr><td class="small">${esc(name)}</td>
+      <td>${v.value}${esc(v.unit||'')}</td>
+      <td class="small muted">${GOAL_LABEL[v.goal]||v.goal}</td>
+      <td>${delta}</td></tr>`;
+  }).join('');
+  $('#bn-metrics').innerHTML =
+    `<div class="small muted" style="margin-bottom:8px">
+       commit <b>${esc(m.git_commit||'?')}</b> · ${esc(m.generated_at||'')} ·
+       ${esc(m.provider||'')}/${esc(m.model||'')} · 耗时 ${m.duration_s||'?'}s
+       ${m.git_dirty?'<span class="tag warn">工作区未提交</span>':''}
+     </div>
+     <table><thead><tr><th>指标</th><th>值</th><th>方向</th><th>较上次</th></tr></thead>
+     <tbody>${rows}</tbody></table>`;
+}
+
+/* 用内联 SVG 画趋势, 不引第三方图表库 ——
+   这个项目的依赖清单是刻意压到最小的, 而这里要画的只是折线。 */
+function sparkline(values, goal){
+  const w = 240, h = 42, pad = 4;
+  const min = Math.min(...values), max = Math.max(...values);
+  const span = (max - min) || 1;
+  const pts = values.map((v, i)=>{
+    const x = pad + i * (w - pad*2) / Math.max(1, values.length - 1);
+    const y = h - pad - (v - min) / span * (h - pad*2);
+    return [x, y];
+  });
+  const line = pts.map(p=>`${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+  const dots = pts.map((p, i)=>{
+    if(i === 0) return `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="2.5" fill="#8b9ab3"/>`;
+    const better = goal === 'lower' ? values[i] < values[i-1] : values[i] > values[i-1];
+    const color = values[i] === values[i-1] ? '#8b9ab3' : (better ? '#3ecf8e' : '#ff6b6b');
+    return `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="2.5" fill="${color}"/>`;
+  }).join('');
+  return `<svg width="${w}" height="${h}" style="display:block">
+    <polyline points="${line}" fill="none" stroke="#3a4a66" stroke-width="1.5"/>${dots}</svg>`;
+}
+
+function renderBenchTrend(){
+  // 时间正序才是"演进", 而接口给的是倒序(最新在前)
+  const runs = benchRuns.slice().reverse();
+  if(runs.length < 2){
+    $('#bn-trend').innerHTML = '<div class="empty">至少需要两次实验记录才能画趋势</div>';
+    return;
+  }
+  const names = [...new Set(runs.flatMap(r=>Object.keys(r.metrics)))]
+    .filter(n=>runs.some(r=>r.metrics[n] && r.metrics[n].goal !== 'info'));
+
+  const cards = names.map(name=>{
+    // 只取该指标存在的那些次, 缺失的跳过而不是补 0 —— 补 0 会画出根本没发生过的悬崖
+    const series = runs.filter(r=>r.metrics[name]);
+    if(series.length < 2) return '';
+    const values = series.map(r=>r.metrics[name].value);
+    const goal = series[series.length-1].metrics[name].goal;
+    const first = values[0], last = values[values.length-1];
+    const better = goal === 'lower' ? last < first : last > first;
+    const changed = last !== first;
+    return `<div class="card" style="padding:12px">
+      <div class="small" style="margin-bottom:2px">${esc(name)}</div>
+      <div class="small muted" style="margin-bottom:6px">
+        ${GOAL_LABEL[goal]} · ${series.length} 次记录 ·
+        ${changed ? `<span class="tag ${better?'ok':'err'}">${first} → ${last}</span>`
+                  : '<span class="tag">无变化</span>'}
+      </div>
+      ${sparkline(values, goal)}</div>`;
+  }).filter(Boolean).join('');
+
+  $('#bn-trend').innerHTML = cards
+    ? `<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(268px,1fr))">${cards}</div>`
+    : '<div class="empty">没有可画趋势的指标</div>';
+}
+
+let benchSource = null;
+$('#bn-refresh').onclick = loadBench;
+$('#bn-run').onclick = ()=>{
+  if(benchSource) benchSource.close();
+  const group = $('#bn-group').value;
+  $('#bn-run').disabled = true;
+  $('#bn-log').textContent = '';
+  $('#bn-status').textContent = '实验进行中…';
+  benchSource = new EventSource('/api/bench/stream?group=' + encodeURIComponent(group));
+  benchSource.onmessage = e=>{
+    let d; try{ d = JSON.parse(e.data); }catch(err){ return; }
+    if(d.type === 'log'){
+      const pre = $('#bn-log');
+      pre.textContent += d.line + '\n';
+      pre.scrollTop = pre.scrollHeight;
+    }else if(d.type === 'error'){
+      $('#bn-status').textContent = '失败：' + d.error;
+      benchSource.close(); $('#bn-run').disabled = false;
+    }else if(d.type === 'done'){
+      $('#bn-status').textContent = '完成，已留档 ' + d.file;
+      benchSource.close(); $('#bn-run').disabled = false;
+      loadBench();
+    }
+  };
+  benchSource.onerror = ()=>{
+    benchSource.close(); $('#bn-run').disabled = false;
+    if($('#bn-status').textContent === '实验进行中…') $('#bn-status').textContent = '连接中断';
+  };
+};
+</script>
+</body>
+</html>
