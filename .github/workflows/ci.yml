@@ -60,7 +60,8 @@ jobs:
           done
           echo "服务 30 秒内未就绪"; exit 1
 
-      - name: 冒烟测试 (33 项)
+      # 不在标题里写死项数: 公网模式下实验触发那几项会合并成一项, 数字会漂
+      - name: 冒烟测试
         run: python scripts/smoke_api.py
 
   demo:
@@ -81,3 +82,90 @@ jobs:
       # 这是最便宜的一层烟雾报警。
       - name: 跑通全部场景
         run: python scripts/demo.py all
+
+  docker:
+    # 跑的正是 Fly 上那个镜像, 所以它绿了基本等于 deploy 不会翻车, 且不需要本地装 Docker
+    name: 镜像构建与容器验证
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 构建镜像
+        run: docker build -t keel:ci .
+
+      - name: 镜像体积
+        run: |
+          bytes=$(docker image inspect keel:ci --format '{{.Size}}')
+          echo "镜像大小: $((bytes / 1024 / 1024)) MB"
+
+      # 关掉公网模式才能跑到实验触发那几项冒烟; 冒烟脚本只用标准库, 无需 pip install
+      - name: 起容器(开发配置)
+        run: |
+          docker run -d --name keel-dev -p 8000:8000 -e KEEL_PUBLIC_MODE=false keel:ci
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8000/api/health > /dev/null && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8000/api/health > /dev/null || {
+            echo "容器 30 秒内未就绪, 日志如下:"; docker logs keel-dev; exit 1; }
+
+      - name: 容器内冒烟
+        run: python scripts/smoke_api.py http://127.0.0.1:8000
+
+      - name: 控制台首页可访问
+        run: curl -sf http://127.0.0.1:8000/ | grep -q 'Ke<span>el</span>'
+
+      # Dockerfile 的 USER 指令很容易在后续改动中被无意抹掉, 而它是沙箱工具的第一道防线
+      - name: 进程不以 root 运行
+        run: |
+          who=$(docker exec keel-dev whoami)
+          echo "容器内用户: $who"
+          [ "$who" = "keel" ] || { echo "预期 keel, 实际 $who"; exit 1; }
+
+      - name: 停掉开发容器
+        run: docker rm -f keel-dev
+
+      # 不传 KEEL_PUBLIC_MODE, 用镜像自带的默认值, 验的是「直接 deploy 上去自我保护就是开的」
+      - name: 起容器(公网配置)
+        run: |
+          docker run -d --name keel-pub -p 8001:8000 -e KEEL_RATE_LIMIT=5 keel:ci
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8001/api/health > /dev/null && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8001/api/health > /dev/null || {
+            docker logs keel-pub; exit 1; }
+
+      - name: 公网模式拒绝超长输入
+        run: |
+          python -c "import json; print(json.dumps({'message': '长' * 5000, 'session_id': 'ci'}))" > /tmp/big.json
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8001/api/chat \
+                 -H 'Content-Type: application/json' --data-binary @/tmp/big.json)
+          echo "超长提问返回 $code"
+          [ "$code" = "413" ] || { echo "预期 413"; exit 1; }
+
+      - name: 公网模式拒绝实验触发
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:8001/api/bench/stream?group=dag')
+          echo "实验触发返回 $code"
+          [ "$code" = "403" ] || { echo "预期 403"; exit 1; }
+          curl -sf 'http://127.0.0.1:8001/api/bench/history' | grep -q '"can_run": *false'
+
+      # 空 message 会被端点判 400, 但中间件在端点之前就计了数, 探测限流不必烧一次 ReAct
+      - name: 公网模式限流生效
+        run: |
+          hit=""
+          for i in $(seq 1 15); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8001/api/chat \
+                   -H 'Content-Type: application/json' -d '{"message":""}')
+            echo "第 $i 次: $code"
+            if [ "$code" = "429" ]; then hit="yes"; break; fi
+          done
+          [ -n "$hit" ] || { echo "15 次请求都没触发限流, 限流没生效"; exit 1; }
+
+      - name: 只读端点不受限流影响
+        run: curl -sf http://127.0.0.1:8001/api/health > /dev/null
+
+      - name: 停掉公网容器
+        if: always()
+        run: docker rm -f keel-pub || true
