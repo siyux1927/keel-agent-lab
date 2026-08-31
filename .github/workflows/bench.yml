@@ -1,0 +1,87 @@
+name: 消融回归
+
+# 把评测当成回归测试用。单元测试守的是"功能没坏", 这里守的是"效果没退" ——
+# Agent 系统的退化通常不抛异常, 而是悄悄多烧 30% 的 token、多绕两步,
+# 没有基线对比的话这类退化永远不会被任何断言抓到。
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    name: 对比 PR 与基线
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出 PR
+        uses: actions/checkout@v4
+        with:
+          path: head
+
+      # 基线在**同一台 runner** 上现跑, 而不是读仓库里存档的产物。
+      # 原因: 墙钟类指标受机器规格影响, 跨机器对比会把硬件差异当成代码退化。
+      - name: 检出基线分支
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          path: base
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: head/requirements.txt
+
+      - name: 安装依赖
+        run: pip install -r head/requirements.txt
+
+      - name: 跑基线实验
+        # 基线分支可能还没有 --json(首次接入时就是这样), 失败不应阻塞 PR。
+        # 比对脚本会识别产物缺失并输出"跳过对比"。
+        continue-on-error: true
+        working-directory: base
+        run: python scripts/bench.py all --json ../baseline.json
+
+      - name: 跑本次实验
+        working-directory: head
+        run: python scripts/bench.py all --json ../current.json
+
+      - name: 对比
+        id: compare
+        run: |
+          python head/scripts/bench_compare.py baseline.json current.json \
+            --out comment.md --fail-on-regression
+        continue-on-error: true
+
+      - name: 贴到 PR
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # 先试改上一条评论, 避免每次推送都新增一条把 PR 刷屏
+          gh pr comment ${{ github.event.number }} --body-file comment.md --edit-last \
+            || gh pr comment ${{ github.event.number }} --body-file comment.md
+        working-directory: ${{ github.workspace }}
+
+      - name: 留存产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-${{ github.event.number || github.run_id }}
+          path: |
+            baseline.json
+            current.json
+            comment.md
+          if-no-files-found: warn
+
+      - name: 有退化则失败
+        if: steps.compare.outcome == 'failure'
+        run: |
+          echo "存在超过容差的指标退化, 详见 PR 评论中的对比表。"
+          exit 1

@@ -6,8 +6,8 @@ import asyncio
 
 import pytest
 
-from agentp.config import settings
-from agentp.loop import (
+from keel.config import settings
+from keel.loop import (
     Action,
     AgentState,
     AgentStatus,
@@ -17,7 +17,7 @@ from agentp.loop import (
     StopReason,
     compute_progress,
 )
-from agentp.tools import CircuitBreaker, get_registry
+from keel.tools import CircuitBreaker, get_registry
 
 
 def _state_with(actions: list[tuple[str, dict]], ok: bool = True) -> AgentState:
@@ -91,7 +91,7 @@ def test_cycle_window_zero_disables_the_detector():
     """
     from dataclasses import replace
 
-    from agentp.config import LoopConfig
+    from keel.config import LoopConfig
 
     actions = [("a", {"i": 1}), ("b", {"i": 2}), ("a", {"i": 1}), ("b", {"i": 2})]
     assert LoopPolicy().check(_state_with(actions)).stop_reason == StopReason.CYCLE_DETECTED
@@ -255,7 +255,7 @@ async def test_blocked_action_is_intercepted_before_execution(memory):
     action = Action("now", {"tz": "Asia/Shanghai"})
     state.avoid_actions.add(action.fingerprint)
 
-    from agentp.observability.events import NullBus
+    from keel.observability.events import NullBus
 
     observations = await engine._execute_actions([action], state, NullBus(), 0)
     assert not observations[0].ok
@@ -267,7 +267,7 @@ async def test_parallel_actions_execute_concurrently(memory):
     state = AgentState(goal="g")
     actions = [Action("web_search", {"query": f"q{i}"}) for i in range(4)]
 
-    from agentp.observability.events import NullBus
+    from keel.observability.events import NullBus
 
     started = asyncio.get_event_loop().time()
     observations = await engine._execute_actions(actions, state, NullBus(), 0)
@@ -281,7 +281,7 @@ async def test_parallel_actions_execute_concurrently(memory):
 async def test_engine_writes_back_memory(memory):
     engine = ReActEngine(memory=memory, verify=False)
     await engine.run("计算 7*6 的结果", session_id="t5")
-    from agentp.memory import MemoryLayer
+    from keel.memory import MemoryLayer
 
     assert memory.store.all(MemoryLayer.PROCEDURAL)  # 成功轨迹固化成技能
     assert memory.working("t5").turns                # 对话进了工作记忆

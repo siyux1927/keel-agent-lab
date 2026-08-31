@@ -1,0 +1,57 @@
+name: 发布实验报告
+
+# main 每次更新都重跑实验并把报告发到 GitHub Pages。
+# 这样公开的那份报告永远和 main 的代码同步 —— README 里嵌的表格是带时间戳的快照,
+# 而这里是活的。两者分工不同, 都要有。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: 跑实验并渲染报告
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 跑全部实验
+        run: python scripts/bench.py all --json site/bench.json
+
+      - name: 渲染报告
+        run: python scripts/report.py site/bench.json --out site/BENCH.md
+
+      - name: 生成站点
+        run: python scripts/build_site.py site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: 部署
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

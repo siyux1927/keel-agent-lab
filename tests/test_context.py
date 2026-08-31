@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentp.context import (
+from keel.context import (
     BudgetAllocator,
     ContextAssembler,
     ContextItem,
@@ -14,9 +14,9 @@ from agentp.context import (
     chunk_stats,
     get_chunker,
 )
-from agentp.context.budget import Zone
-from agentp.llm.base import Message
-from agentp.util import count_tokens
+from keel.context.budget import Zone
+from keel.llm.base import Message
+from keel.util import count_tokens
 
 
 # ==========================================================================

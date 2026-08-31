@@ -1,0 +1,13 @@
+# 本地一键起服务。默认关掉公网自我保护 —— 实验室要能喂大文档。
+services:
+  keel:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      KEEL_PUBLIC_MODE: "false"
+      KEEL_PROVIDER: mock
+    # 接真实模型时把 .env 挂进去, 而不是写进 compose ——
+    # compose 文件是要进版本库的, Key 不该出现在里面
+    # env_file: .env
+    restart: unless-stopped

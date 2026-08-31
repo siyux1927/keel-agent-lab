@@ -1,4 +1,4 @@
-﻿"""命令行演示脚本 —— 五个场景, 每个对应一块核心能力。
+"""命令行演示脚本 —— 五个场景, 每个对应一块核心能力。
 
     python scripts/demo.py all          # 全部跑一遍(约 30 秒)
     python scripts/demo.py chunk        # 切片策略对比
@@ -8,7 +8,7 @@
     python scripts/demo.py orchestrate  # DAG 多智能体并发编排
 
 默认跑在离线 Mock Provider 上, 不需要任何 API Key。
-配好 .env 里的 AGENTP_PROVIDER=openai + AGENTP_API_KEY 就会自动切到真实模型。
+配好 .env 里的 KEEL_PROVIDER=openai + KEEL_API_KEY 就会自动切到真实模型。
 """
 
 from __future__ import annotations
@@ -19,15 +19,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agentp.config import settings
-from agentp.context import BudgetAllocator, ContextAssembler, chunk_stats, get_chunker
-from agentp.context.assembler import default_system_prompt
-from agentp.llm import get_provider
-from agentp.loop import ReActEngine
-from agentp.memory import MemoryLayer, get_memory
-from agentp.orchestrator import Orchestrator
-from agentp.tools import get_registry
-from agentp.util import now_ts
+from keel.config import settings
+from keel.context import BudgetAllocator, ContextAssembler, chunk_stats, get_chunker
+from keel.context.assembler import default_system_prompt
+from keel.llm import get_provider
+from keel.loop import ReActEngine
+from keel.memory import MemoryLayer, get_memory
+from keel.orchestrator import Orchestrator
+from keel.tools import get_registry
+from keel.util import now_ts
 
 DOC = """# Agent 平台工程手册
 
@@ -96,7 +96,7 @@ async def demo_chunk() -> None:
 
 async def demo_context() -> None:
     title("上下文预算调度 —— 窗口收缩时会发生什么")
-    from agentp.context.budget import build_zones
+    from keel.context.budget import build_zones
 
     demand = {"system": 220, "task": 80, "tools": 620, "procedural": 400,
               "semantic": 3000, "episodic": 900, "retrieved": 9000,
@@ -275,7 +275,7 @@ async def main() -> None:
         print(f"未知场景: {which}。可选: all, {', '.join(demos)}")
         return
     print("\n" + "=" * 78)
-    print("  演示结束。运行 `python -m uvicorn agentp.server.app:app --reload` 打开可视化控制台。")
+    print("  演示结束。运行 `python -m uvicorn keel.server.app:app --reload` 打开可视化控制台。")
     print("=" * 78)
 
 

@@ -36,27 +36,31 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
+import platform
 import statistics
+import subprocess
 import sys
 import time
 import unicodedata
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agentp.config import LoopConfig, settings
-from agentp.context import BudgetAllocator, ContextAssembler
-from agentp.context.assembler import default_system_prompt
-from agentp.llm import build_provider, set_provider
-from agentp.llm.base import Message
-from agentp.loop import ReActEngine
-from agentp.loop.policy import LoopPolicy
-from agentp.memory import MemoryLayer, MemoryManager, set_memory
-from agentp.orchestrator import Orchestrator
-from agentp.tools import get_registry
-from agentp.util import cosine, count_tokens, tokenize
+from keel.config import LoopConfig, settings
+from keel.context import BudgetAllocator, ContextAssembler
+from keel.context.assembler import default_system_prompt
+from keel.llm import build_provider, set_provider
+from keel.llm.base import Message
+from keel.loop import ReActEngine
+from keel.loop.policy import LoopPolicy
+from keel.memory import MemoryLayer, MemoryManager, set_memory
+from keel.orchestrator import Orchestrator
+from keel.tools import get_registry
+from keel.util import cosine, count_tokens, tokenize
 
 # ==========================================================================
 # 排版工具: 中文是全角, 直接 ljust 会错位
@@ -90,6 +94,67 @@ def pct(new: float, old: float) -> str:
         return "n/a"
     delta = (new - old) / old * 100
     return f"{delta:+.1f}%"
+
+
+# ==========================================================================
+# 结果记录 —— 让实验产出机器可读的产物
+#
+# 控制台输出是给人看的, 看完就没了。而消融结论要进 README、要在 CI 里做回归比对,
+# 就必须有一份带出处(commit / 时间 / 配置)的结构化产物。手抄进文档的数字最大的问题
+# 不是抄错, 是它不会跟着代码变 —— 改完代码文档还停在上个版本, 越往后越不可信。
+# ==========================================================================
+
+_RESULTS: dict[str, Any] = {}
+_METRICS: dict[str, dict[str, Any]] = {}
+
+
+def emit(group: str, detail: dict[str, Any]) -> None:
+    """记录一组实验的完整明细, 供报告渲染使用。"""
+    _RESULTS[group] = detail
+
+
+def metric(name: str, value: float, goal: str = "info", unit: str = "") -> None:
+    """登记一个可回归比对的关键指标。
+
+    goal 决定 CI 如何判定变化方向: lower=越小越好, higher=越大越好, info=只展示不判定。
+    方向写进产物而不是写在比对脚本里, 是为了让历史产物自解释 —— 半年后指标定义变了,
+    旧产物仍然能被正确解读, 否则跨版本对比会得出反向结论。
+    """
+    _METRICS[name] = {"value": round(float(value), 6), "goal": goal, "unit": unit}
+
+
+def _git(*args: str) -> str:
+    try:
+        out = subprocess.run(["git", *args], capture_output=True, text=True,
+                             timeout=5, cwd=str(Path(__file__).resolve().parent.parent))
+        return out.stdout.strip() if out.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def build_artifact(provider: Any, groups: list[str], duration_s: float, real: bool) -> dict[str, Any]:
+    return {
+        "schema": 1,
+        "meta": {
+            "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "git_commit": _git("rev-parse", "HEAD")[:12],
+            "git_branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
+            # 工作区脏时的数字不可复现, 必须标出来, 否则会被当成某个 commit 的正式基线
+            "git_dirty": bool(_git("status", "--porcelain")),
+            "provider": provider.name,
+            "model": provider.model,
+            "real_model": real,
+            "python": platform.python_version(),
+            "platform": platform.system(),
+            "groups": groups,
+            "duration_s": round(duration_s, 2),
+            "context_window": settings.context.model_context_window,
+            "decay_half_life_hours": settings.memory.decay_half_life_hours,
+            "mmr_lambda": settings.memory.mmr_lambda,
+        },
+        "metrics": _METRICS,
+        "groups": _RESULTS,
+    }
 
 
 # ==========================================================================
@@ -325,6 +390,7 @@ async def bench_guardrails(provider: Any, real: bool) -> None:
             rows.append(await run_one(task, arm, cfg, arm_provider))
     print(" " * 60, end="\r")
 
+    by_kind: dict[str, Any] = {}
     for kind, kind_label in (("healthy", "正常任务"), ("pathological", "病态任务")):
         subset = [r for r in rows if r.task.kind == kind]
         if not subset:
@@ -336,6 +402,16 @@ async def bench_guardrails(provider: Any, real: bool) -> None:
                 per_arm[arm_label] = _summarize(arm_rows)
         n = len(subset) // max(1, len(per_arm))
         _print_arm_table(f"{kind_label}({n} 个)", per_arm)
+
+        by_kind[kind] = per_arm
+        for arm, s in per_arm.items():
+            metric(f"guard.{kind}.{arm}.steps", s["steps"], "lower", "步")
+            metric(f"guard.{kind}.{arm}.tokens", s["tokens"], "lower", "tok")
+            metric(f"guard.{kind}.{arm}.llm_calls", s["llm"], "lower", "次")
+            metric(f"guard.{kind}.{arm}.redundant", s["redundant"], "lower", "次")
+            metric(f"guard.{kind}.{arm}.answered_rate", s["answered"] / max(1, s["n"]), "higher")
+            if s["graded"]:
+                metric(f"guard.{kind}.{arm}.correct_rate", s["correct"] / s["graded"], "higher")
 
         if len(per_arm) == 2:
             a, b = per_arm["naive"], per_arm["guarded"]
@@ -360,6 +436,18 @@ async def bench_guardrails(provider: Any, real: bool) -> None:
     print("\n  读法: 正常任务两组应当完全一致 —— 护栏的第一要求是不误杀;")
     print("        病态任务上护栏把步数和 token 砍掉大半, 且仍然产出降级答案而不是抛错。")
 
+    emit("guard", {
+        "by_kind": by_kind,
+        "pathological": [
+            {"task": r.task.id, "arm": r.arm, "steps": r.steps, "redundant": r.redundant,
+             "reflections": r.reflections, "blocked": r.blocked,
+             "stop_reason": r.stop_reason, "answered": r.answered}
+            for r in sorted(detail, key=lambda x: (x.task.id, x.arm))
+        ],
+        "task_count": len(tasks),
+        "skipped_pathological": real,
+    })
+
 
 # ==========================================================================
 # 第 2 组: 熔断器
@@ -378,7 +466,7 @@ async def bench_breaker(provider: Any) -> None:
 
     rows = []
     for label, threshold in (("熔断关闭", 10**9), ("熔断开启(阈值3)", 3)):
-        from agentp.tools.base import CircuitBreaker
+        from keel.tools.base import CircuitBreaker
 
         tool.breaker = CircuitBreaker(failure_threshold=threshold, cooldown_s=30.0)
         started = time.perf_counter()
@@ -412,6 +500,11 @@ async def bench_breaker(provider: Any) -> None:
           f" 耗时 {pct(on['ms'], off['ms'])}")
     print("    读法: 熔断器不减少模型的调用意图, 它减少的是**打到下游的真实流量**。")
     print("          这是雪崩防护的关键 —— 下游已经 503 了, 再重试只会让它更起不来。")
+
+    emit("breaker", {"rows": rows, "intended_calls": attempts_calls})
+    metric("breaker.downstream_open", on["downstream"], "lower", "次")
+    metric("breaker.downstream_closed", off["downstream"], "info", "次")
+    metric("breaker.rejected", on["rejected"], "higher", "次")
 
 
 # ==========================================================================
@@ -524,6 +617,17 @@ async def bench_mmr(provider: Any) -> None:
     print("          改写句之间余弦本来就不高, MMR 能压的空间因此变小。换真实 embedding 后差距会")
     print("          更明显, 这也是为什么「平均词重合」(完全不依赖 embedding)这一列更可信。")
 
+    emit("mmr", {
+        "query": query,
+        "default_lambda": original_lambda,
+        "corpus": {topic: len(texts) for topic, texts in _REDUNDANT.items()},
+        "sweep": [{"label": label, **entry} for label, entry in sweep],
+    })
+    metric("mmr.off.redundancy_cos", baseline["avg_cos"], "info")
+    metric("mmr.default.redundancy_cos", default["avg_cos"], "lower")
+    metric("mmr.default.redundancy_jaccard", default["avg_jac"], "lower")
+    metric("mmr.default.relevance", default["relevance"], "higher")
+
 
 # ==========================================================================
 # 第 4 组: 预算调度 + 压缩
@@ -603,6 +707,7 @@ async def bench_budget(provider: Any) -> None:
           + pad("压缩分区", 10, True))
     overflow_count = {"压缩关闭": 0, "压缩开启": 0}
     windows = (2048, 4096, 8192, 16384)
+    budget_rows: list[dict[str, Any]] = []
     for window in windows:
         budget = BudgetAllocator(context_window=window).total_budget
         for label, compress in (("压缩关闭", False), ("压缩开启", True)):
@@ -612,6 +717,10 @@ async def bench_budget(provider: Any) -> None:
             dropped = sum(1 for a in assembled.plan.allocations.values() if a.dropped)
             squeezed = sum(1 for a in assembled.plan.allocations.values()
                            if a.needs_compression and not a.dropped)
+            budget_rows.append({
+                "window": window, "label": label, "tokens": assembled.total_tokens,
+                "budget": budget, "overflow": over, "dropped": dropped, "squeezed": squeezed,
+            })
             print("  " + pad(str(window), 8, True) + pad(label, 12)
                   + pad(str(assembled.total_tokens), 14, True)
                   + pad(str(budget), 11, True)
@@ -626,11 +735,25 @@ async def bench_budget(provider: Any) -> None:
 
     sub("窗口 2048 时的取舍顺序(优先级的产品判断)")
     assembled = await assemble(2048, compress=True)
+    zones = []
     for name, alloc in sorted(assembled.plan.allocations.items(),
                               key=lambda kv: -kv[1].granted):
         state = "丢弃" if alloc.dropped else ("压缩" if alloc.needs_compression else "原样")
         print(f"    {pad(name, 12)} 需求 {pad(str(alloc.requested), 6, True)}"
               f" → 分配 {pad(str(alloc.granted), 6, True)}  [{state}]")
+        zones.append({"zone": name, "requested": alloc.requested,
+                      "granted": alloc.granted, "state": state})
+
+    emit("budget", {
+        "rows": budget_rows,
+        "overflow_count": overflow_count,
+        "windows": list(windows),
+        "raw_demand_tokens": raw.total_tokens,
+        "zones_at_2048": zones,
+    })
+    metric("budget.overflow_naive", overflow_count["压缩关闭"], "info", "次")
+    metric("budget.overflow_compressed", overflow_count["压缩开启"], "lower", "次")
+    metric("budget.raw_demand_tokens", raw.total_tokens, "info", "tok")
 
 
 # ==========================================================================
@@ -653,6 +776,7 @@ async def bench_digest(provider: Any) -> None:
           + pad("工具调用", 10, True) + pad("重复调用", 10, True)
           + pad("scratchpad", 12) + pad("答对", 7))
     summary: dict[str, list[int]] = {"关闭": [], "开启": []}
+    digest_rows: list[dict[str, Any]] = []
     for window in (1024, 1536, 2048, 8192):
         for label, inject in (("关闭", False), ("开启", True)):
             await fresh_env(provider)
@@ -676,12 +800,22 @@ async def bench_digest(provider: Any) -> None:
                   + pad(str(len(fps)), 10, True) + pad(str(redundant), 10, True)
                   + pad(str(method), 12)
                   + pad("是" if task.expect in result.answer else "否", 7))
+            digest_rows.append({
+                "window": window, "inject": inject, "steps": result.state.step_count,
+                "tool_calls": len(fps), "redundant": redundant,
+                "scratchpad_method": str(method),
+                "correct": task.expect in result.answer,
+            })
 
     off, on = mean([float(x) for x in summary["关闭"]]), mean([float(x) for x in summary["开启"]])
     print(f"\n    → 各窗口平均重复调用: 关闭 {off:.2f} 次, 开启 {on:.2f} 次 ({pct(on, off)})")
     print("    读法: 看 scratchpad 那一列。method=verbatim 说明没被压缩, 两组自然一样;")
     print("          一旦变成 middle_out/extractive, 关闭组就开始重复调用了 —— 这正是")
     print("          「把关键状态放进不可丢弃分区」这个设计要解决的问题。")
+
+    emit("digest", {"rows": digest_rows, "avg_redundant": {"off": off, "on": on}})
+    metric("digest.redundant_off", off, "info", "次")
+    metric("digest.redundant_on", on, "lower", "次")
 
 
 # ==========================================================================
@@ -748,6 +882,13 @@ async def bench_orchestration(provider: Any) -> None:
     print(f"    → 验证降级: 简单任务「计算 6*7」的执行模式 = {simple.mode}"
           f"(省掉规划与汇总两次模型调用)")
 
+    emit("dag", {"rows": rows, "goal": MULTI_GOAL, "simple_task_mode": simple.mode})
+    metric("dag.speedup", dag["speedup"] or 0.0, "higher", "×")
+    metric("dag.wall_ms", dag["wall"], "info", "ms")
+    metric("dag.tokens", dag["tokens"], "info", "tok")
+    metric("single.wall_ms", single["wall"], "info", "ms")
+    metric("single.tokens", single["tokens"], "info", "tok")
+
 
 # ==========================================================================
 
@@ -763,11 +904,13 @@ GROUPS = {
 
 
 async def main() -> None:
-    parser = argparse.ArgumentParser(description="AgentP 消融实验")
+    parser = argparse.ArgumentParser(description="Keel 消融实验")
     parser.add_argument("group", nargs="?", default="all",
                         choices=["all", *GROUPS], help="要跑的实验组")
     parser.add_argument("--real", action="store_true",
                         help="用 .env 里配置的真实模型(默认强制 mock 以保证确定性)")
+    parser.add_argument("--json", metavar="PATH", default=None,
+                        help="把结构化结果写到指定路径, 供报告渲染与 CI 回归比对")
     args = parser.parse_args()
 
     # 默认强制 mock: bench 的全部价值建立在"差异可归因"上, 真实模型的输出方差
@@ -790,10 +933,20 @@ async def main() -> None:
         else:
             await fn(provider)
 
+    duration = time.perf_counter() - started
     print(f"\n{'=' * 82}")
-    print(f"  全部实验完成, 耗时 {time.perf_counter() - started:.1f}s。")
+    print(f"  全部实验完成, 耗时 {duration:.1f}s。")
     print("  这些数字的用途: 把「我实现了 X」变成「我实现了 X, 并证明它带来了 Y」。")
     print(f"{'=' * 82}")
+
+    if args.json:
+        artifact = build_artifact(provider, names, duration, args.real)
+        out = Path(args.json)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(artifact, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"\n  已写出 {len(_METRICS)} 项指标 / {len(_RESULTS)} 组明细 → {out}")
+        if artifact["meta"]["git_dirty"]:
+            print("  注意: 工作区有未提交改动, 这份产物不可复现, 不应作为基线。")
 
     closer = getattr(provider, "aclose", None)
     if closer:

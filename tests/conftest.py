@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import pytest
 
-from agentp.llm import build_provider, reset_provider, set_provider
-from agentp.memory import MemoryManager, reset_memory, set_memory
-from agentp.tools import get_registry
+from keel.llm import build_provider, reset_provider, set_provider
+from keel.memory import MemoryManager, reset_memory, set_memory
+from keel.tools import get_registry
 
 
 @pytest.fixture(autouse=True)
@@ -18,7 +18,7 @@ def _isolate():
     """每个用例前后重置全局单例, 并把全局 Provider 钉死在 Mock 上。
 
     "钉死"这一步是必须的, 不是保险起见: 只 reset 的话, get_provider() 会照着 .env
-    重建 —— 一旦本地把 AGENTP_PROVIDER 改成真实厂商, 没有显式注入 provider 的用例
+    重建 —— 一旦本地把 KEEL_PROVIDER 改成真实厂商, 没有显式注入 provider 的用例
     (以及 kb_search 这种走全局单例的工具)就会真的去打网络请求。后果是测试变慢、
     要花钱、而且断言结果取决于当天模型的心情。测试的确定性不能依赖一个配置文件。
     """

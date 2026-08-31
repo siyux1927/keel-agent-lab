@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from agentp.config import settings
-from agentp.memory import MemoryLayer, MemoryRecord, Skill, judge_importance
-from agentp.memory.working import WorkingMemory
-from agentp.util import now_ts
+from keel.config import settings
+from keel.memory import MemoryLayer, MemoryRecord, Skill, judge_importance
+from keel.memory.working import WorkingMemory
+from keel.util import now_ts
 
 
 # ==========================================================================

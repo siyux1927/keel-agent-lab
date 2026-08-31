@@ -1,0 +1,83 @@
+name: CI
+
+# 全套测试跑在离线 Mock Provider 上 —— 不需要任何 API Key, 完全确定性, CI 成本为零。
+# 这是 Provider 抽象带来的直接收益: 换成真模型的话, 断言结果会取决于当天模型的心情,
+# CI 就只能沦为摆设。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: 测试 (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 单元测试
+        run: pytest -q
+
+  smoke:
+    name: HTTP / SSE 端到端冒烟
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 启动服务
+        run: |
+          python -m uvicorn keel.server.app:app --host 127.0.0.1 --port 8000 &
+          # 轮询直到健康检查通过, 而不是 sleep 一个拍脑袋的秒数 ——
+          # 固定 sleep 在 CI 上要么白等要么偶发失败, 是 flaky 的经典来源
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8000/api/health > /dev/null && exit 0
+            sleep 1
+          done
+          echo "服务 30 秒内未就绪"; exit 1
+
+      - name: 冒烟测试 (33 项)
+        run: python scripts/smoke_api.py
+
+  demo:
+    name: 场景演示可运行
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      # demo 没有断言, 但它串起了全部五个场景 —— 只要有一处抛异常就会退出非零。
+      # 这是最便宜的一层烟雾报警。
+      - name: 跑通全部场景
+        run: python scripts/demo.py all
