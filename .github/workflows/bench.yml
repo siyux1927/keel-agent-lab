@@ -65,10 +65,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # 先试改上一条评论, 避免每次推送都新增一条把 PR 刷屏
-          gh pr comment ${{ github.event.number }} --body-file comment.md --edit-last \
-            || gh pr comment ${{ github.event.number }} --body-file comment.md
-        working-directory: ${{ github.workspace }}
+          # 必须显式给 --repo: 两次 checkout 都落在子目录里, 工作区根目录没有 .git,
+          # gh 无法从当前目录推断仓库。
+          # --edit-last 是为了避免每次推送都新增一条评论把 PR 刷屏; 首次没有可改的评论时回退到新建。
+          gh pr comment ${{ github.event.number }} --repo ${{ github.repository }} \
+            --body-file comment.md --edit-last \
+            || gh pr comment ${{ github.event.number }} --repo ${{ github.repository }} \
+                 --body-file comment.md
 
       - name: 留存产物
         uses: actions/upload-artifact@v4

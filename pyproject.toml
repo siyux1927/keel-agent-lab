@@ -29,3 +29,7 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 addopts = "-q --tb=short"
+# 没有这行, 裸跑 `pytest` 会 ModuleNotFoundError: No module named 'keel' ——
+# prepend 模式只把 tests/ 放进 sys.path, 根目录得靠 `python -m pytest` 顺带加,
+# 两种调用方式行为不一致, 而 README 和 CI 用的恰好是裸 pytest。
+pythonpath = ["."]
