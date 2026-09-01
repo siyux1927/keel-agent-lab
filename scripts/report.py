@@ -1,7 +1,7 @@
 """把 bench 产出的 JSON 渲染成 Markdown 报告。
 
     python scripts/report.py data/bench/latest.json --out docs/BENCH.md
-    python scripts/report.py data/bench/latest.json --inject README.md
+    python scripts/report.py data/bench/latest.json --inject 任意带标记对的文档.md
 
 为什么要有这一步:
 
