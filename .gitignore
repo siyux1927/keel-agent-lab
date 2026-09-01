@@ -18,6 +18,10 @@ data/*
 site/
 docs/BENCH.md
 
+# 前端源码在 web/, 但构建产物(keel/server/static)是提交进版本库的 ——
+# 这样 clone 下来 pip install 就能起服务, 看项目的人不必先装一套 Node 工具链。
+web/node_modules/
+
 .idea/
 .vscode/
 .DS_Store

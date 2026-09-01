@@ -10,6 +10,8 @@ tests
 docs
 site
 data/bench
+# 前端源码不进镜像: 镜像里跑的是已构建好的 keel/server/static, 不需要 Node
+web
 image.png
 DEV_SKILL.md
 .env

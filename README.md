@@ -2,9 +2,13 @@
 
 > **keel** /kiːl/ n. 龙骨——船体最底部的中轴结构。它不提供动力，只决定船在浪里翻不翻。
 
-一个可运行、可观测、有护栏的 **Agent 运行时**。不是把 LLM 包一层的 demo，而是把生产环境里真正会出事的地方——上下文超窗、记忆爆炸、死循环、工具雪崩——各自做了工程解法。
+**一个用来回答「harness 层的改动到底有没有用」的 Agent 运行时与配套评测链路。**
 
-**四条主线**：上下文工程（分层切片 / Token 预算调度 / 压缩）· 四层记忆系统（混合检索 / 遗忘曲线 / 反思固化）· Loop Engineering（护栏 / 死循环检测 / 熔断 / 反思重规划）· 多 Agent 编排（DAG 分层并发 / Planner-Worker-Critic）。
+公开榜单测的是模型能力：换个模型，分数会动；而给 harness 加一层护栏、换一种切片策略、调整预算分配，分数很可能一分不掉——因为它根本不测「过程有多浪费」。于是 harness 层的工程决策长期缺少判据，只能靠感觉做。
+
+这里的做法是把每个机制都做成**可开关**的，然后在**确定性执行**下做 A/B 对照：用规则驱动的离线 Provider 顶替真实模型，消除模型方差，使两组之间的差异可以完全归因到 harness 改动本身，而不是模型这次心情好。六组消融的结果由 CI 自动生成、回填进本文、并在每个 PR 上与基线逐项比对，指标退化即阻断合并。
+
+**被测对象**是一个完整的 Agent 运行时：上下文工程（分层切片 / Token 预算调度 / 压缩）· 四层记忆系统（混合检索 / 遗忘曲线 / 反思固化）· Loop Engineering（护栏 / 死循环检测 / 熔断 / 反思重规划）· 多 Agent 编排（DAG 分层并发 / Planner-Worker-Critic）· 工具沙箱（AST 白名单 / 目录穿越防护）。
 
 > 默认跑在**离线 Mock Provider** 上：不需要任何 API Key，`pip install` 完就能跑通全部功能、114 个测试和整套消融实验。配一个 Key 即可无缝切换到 DeepSeek / OpenAI / 通义千问。
 
@@ -24,6 +28,15 @@ python scripts/smoke_api.py     # 服务起来后跑：38 项 HTTP/SSE 端到端
 ```
 
 或者直接起容器：`docker compose up --build`。
+
+控制台是 React + TypeScript 写的，但**构建产物已提交进仓库**（`keel/server/static`），所以上面这些命令不需要装 Node。只有要改前端时才需要：
+
+```bash
+cd web
+npm ci
+npm run dev      # http://127.0.0.1:5173，API 请求代理到 8000 端口的后端
+npm run build    # 产物写回 keel/server/static，改完前端必须跑一次并提交
+```
 
 单独看某一块能力：
 
@@ -390,7 +403,7 @@ Agent 是非确定性系统，"能复现"比"有日志"重要得多。`Tracer` �
 
 > 并发编排时多个 Task 共用一个 Tracer，span 栈必须放在 `contextvar` 里；放在实例上的话各任务的 push/pop 会交错，父子关系全乱。
 
-控制台五个页签（`http://127.0.0.1:8000`）：
+控制台六个页签（`http://127.0.0.1:8000`）：
 
 - **对话 / 执行** — SSE 逐步推送思考、工具调用、护栏触发、反思；实时显示上下文分区占用
 - **调用链追踪** — Span 树、每个环节的 token 与耗时
@@ -398,6 +411,8 @@ Agent 是非确定性系统，"能复现"比"有日志"重要得多。`Tracer` �
 - **上下文实验室** — 把窗口调到 1500 就能直接看到低优先级分区被丢弃、高优先级被压缩，以及最终送进模型的完整消息
 - **切片实验室** — 五种策略并排对比块数、token 分布、标准差
 - **消融实验** — 界面上直接跑 A/B，实时看命令行输出；历次结果留档，画出每个指标随 commit 的走向。绿点表示比上次更好、红点更差——"这次改动让哪个指标变差了"从此是个能当场回答的问题
+
+前端是 React + TypeScript（Vite 构建），源码在 `web/`。这里 TypeScript 挣的不是"少写几个 bug"，而是**把前后端契约钉死**：`web/src/types.ts` 里那个 `ChatEvent` 联合类型枚举了服务端会推的全部 20 种 SSE 事件，服务端新 emit 一种却忘了在前端登记，`tsc` 会当场报错，而不是让这个事件在页面上静默消失。趋势图是手写的内联 SVG，没引图表库——要画的只是折线，为此拖进来一个 200KB 的依赖不划算。
 
 ---
 
@@ -419,7 +434,7 @@ Agent 是非确定性系统，"能复现"比"有日志"重要得多。`Tracer` �
 
 | 工作流 | 触发 | 做什么 |
 |---|---|---|
-| `ci.yml` | push / PR | 114 个测试跑 Python 3.10/3.11/3.12 矩阵；起服务跑 38 项 HTTP/SSE 冒烟；`demo.py all` 串一遍五个场景 |
+| `ci.yml` | push / PR | 114 个测试跑 Python 3.10/3.11/3.12 矩阵；起服务跑 38 项 HTTP/SSE 冒烟；`demo.py all` 串一遍五个场景；前端类型检查、重新构建并校验产物未陈旧 |
 | `bench.yml` | PR | 在**同一台 runner** 上分别跑基线分支和 PR 的实验，逐项对比 39 个指标，把结果贴成 PR 评论；有退化则 CI 失败 |
 | `pages.yml` | push 到 main | 重跑实验、渲染报告、发布到 GitHub Pages |
 
@@ -432,6 +447,8 @@ Agent 是非确定性系统，"能复现"比"有日志"重要得多。`Tracer` �
 **基线为 0 的指标不看相对变化。** 0 → 3 的相对变化是无穷大，报出来只会淹没真正的信号，所以这类指标退回看绝对量。
 
 **首次接入不能硬失败。** 基线分支上还没有产物是正常的，比对脚本识别到产物缺失就输出"跳过对比"，否则第一个 PR 永远合不进去。
+
+**前端产物提交进仓库，就必须有人守着它别过期。** 把构建产物纳入版本控制是为了让 clone 下来 `pip install` 就能起服务——看项目的人不该为了打开界面先装一套 Node 工具链。代价是产物会和源码脱节：改了 `web/` 却忘了构建，仓库里的界面就是旧的，而且没有任何报错。所以 CI 重新构建一遍再比对 `git status`，不一致就失败。为此还要把 `keel/server/static/**` 在 `.gitattributes` 里标成 `-text`：本机在 Windows 构建、CI 在 Linux 重建，中间只要有一次 CRLF 转换，字节比对就会误报。
 
 CI 全程跑在离线 Mock 上——零 API Key、零成本、完全确定性。换成真模型的话断言结果会取决于当天模型的心情，CI 就只能沦为摆设。
 
@@ -480,7 +497,11 @@ keel/
 ├── orchestrator/         graph(DAG) · roles(Planner/Worker/Critic) · supervisor
 ├── tools/                base(Schema/超时/重试/熔断) · builtin(AST 沙箱)
 ├── observability/        trace(Span 树/成本) · events(SSE 总线)
-└── server/               FastAPI + 单文件 Web 控制台
+└── server/               FastAPI · static/ 为前端构建产物(已提交)
+web/                      控制台源码：React + TypeScript + Vite
+├── src/types.ts          前后端契约：20 种 SSE 事件的联合类型
+├── src/components/       EventStream · SpanTree · ZoneBars · Sparkline(内联 SVG)
+└── src/views/            六个页签
 scripts/demo.py           五个场景的命令行演示
 scripts/bench.py          A/B 护栏对照 + 五组机制消融（--json 产出结构化结果）
 scripts/report.py         实验产物 → Markdown 报告 / 回填 README
@@ -488,7 +509,7 @@ scripts/bench_compare.py  两份产物对比，指标退化即非零退出
 scripts/build_site.py     报告 → 静态站点（零依赖 Markdown 子集渲染）
 scripts/smoke_api.py      HTTP + SSE 端到端冒烟（38 项）
 tests/                    114 个测试，全部离线
-.github/workflows/        CI：测试矩阵 · 消融回归 · 报告发布
+.github/workflows/        CI：测试矩阵 · 前端产物一致性 · 消融回归 · 报告发布
 Dockerfile · fly.toml     容器化与公网部署
 ```
 

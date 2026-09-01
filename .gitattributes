@@ -1,0 +1,7 @@
+# 构建产物按字节原样存取。本机在 Windows 上构建、CI 在 Linux 上重建同一份产物做比对,
+# 一旦 git 在中间做 CRLF 转换, 两边字节不一致, 产物陈旧检查就会误报。
+keel/server/static/** -text
+
+# 供 Linux 容器与 CI 执行的文件必须是 LF, 否则 shebang 会带上 \r 而无法执行
+*.sh text eol=lf
+Dockerfile text eol=lf
