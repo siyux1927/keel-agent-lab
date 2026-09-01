@@ -1,11 +1,15 @@
 [build-system]
-requires = ["setuptools>=68"]
+# PEP 639 的 SPDX 写法要 setuptools>=77, 低于此版本会报 license 字段无效
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "keel"
 version = "0.1.0"
 description = "可量化 harness 层改动的 Agent 运行时与消融评测链路"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.115",
