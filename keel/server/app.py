@@ -23,6 +23,7 @@ from typing import Any, Optional
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from keel.config import settings
@@ -39,10 +40,14 @@ from keel.tools import get_registry
 STATIC_DIR = Path(__file__).parent / "static"
 
 app = FastAPI(title="Keel", version="0.1.0",
-              description="Agent 运行时: 上下文工程 / 记忆系统 / Loop Engineering / 多 Agent 编排")
+              description="可量化 harness 层改动的 Agent 运行时与消融评测链路")
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
+
+# 前端是 Vite 构建产物, 引用的是带内容 hash 的 /assets/index-xxxx.js。
+# check_dir=False: 产物没构建时也要能起服务, 否则 pytest 和 API 冒烟全跟着挂。
+app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets", check_dir=False), name="assets")
 
 
 # ==========================================================================
@@ -149,6 +154,8 @@ class RememberRequest(BaseModel):
 
 @app.get("/")
 async def index() -> FileResponse:
+    if not (STATIC_DIR / "index.html").exists():
+        raise HTTPException(503, "前端产物缺失, 先在 web/ 下执行 npm ci && npm run build")
     return FileResponse(STATIC_DIR / "index.html")
 
 

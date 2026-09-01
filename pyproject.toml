@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "keel"
 version = "0.1.0"
-description = "Agent 运行时: 上下文工程 / 记忆系统 / Loop Engineering / 多 Agent 编排"
+description = "可量化 harness 层改动的 Agent 运行时与消融评测链路"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.115",

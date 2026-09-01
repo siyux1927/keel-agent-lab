@@ -60,7 +60,8 @@ jobs:
           done
           echo "服务 30 秒内未就绪"; exit 1
 
-      - name: 冒烟测试 (33 项)
+      # 不在标题里写死项数: 公网模式下实验触发那几项会合并成一条, 数字会漂
+      - name: 冒烟测试
         run: python scripts/smoke_api.py
 
   demo:
@@ -81,3 +82,36 @@ jobs:
       # 这是最便宜的一层烟雾报警。
       - name: 跑通全部场景
         run: python scripts/demo.py all
+
+  web:
+    name: 前端类型检查与产物一致性
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: 安装依赖
+        working-directory: web
+        run: npm ci
+
+      # build 脚本里串了 tsc --noEmit, 所以类型错误会在这一步直接失败
+      - name: 类型检查并构建
+        working-directory: web
+        run: npm run build
+
+      # 产物是提交进版本库的(为了让 clone 下来不装 Node 也能跑), 代价就是它可能落后于源码。
+      # 这一步重建一遍再比对: 改了 web/ 却忘了提交产物, 在这里就会被拦住, 而不是等到
+      # 别人 clone 下来发现界面是旧的。
+      - name: 产物必须与源码一致
+        run: |
+          if [ -n "$(git status --porcelain keel/server/static)" ]; then
+            echo "::error::前端产物与源码不一致, 请在 web/ 下执行 npm run build 并提交 keel/server/static"
+            git status --porcelain keel/server/static
+            exit 1
+          fi
+          echo "产物与源码一致"
