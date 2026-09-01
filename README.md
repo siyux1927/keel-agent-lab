@@ -434,7 +434,7 @@ Agent 是非确定性系统，"能复现"比"有日志"重要得多。`Tracer` �
 
 | 工作流 | 触发 | 做什么 |
 |---|---|---|
-| `ci.yml` | push / PR | 114 个测试跑 Python 3.10/3.11/3.12 矩阵；起服务跑 38 项 HTTP/SSE 冒烟；`demo.py all` 串一遍五个场景；前端类型检查、重新构建并校验产物未陈旧 |
+| `ci.yml` | push / PR | 114 个测试跑 Python 3.10/3.11/3.12 矩阵；起服务跑 38 项 HTTP/SSE 冒烟；`demo.py all` 串一遍五个场景；校验前端产物由当前源码构建，再做类型检查与构建 |
 | `bench.yml` | PR | 在**同一台 runner** 上分别跑基线分支和 PR 的实验，逐项对比 39 个指标，把结果贴成 PR 评论；有退化则 CI 失败 |
 | `pages.yml` | push 到 main | 重跑实验、渲染报告、发布到 GitHub Pages |
 
@@ -448,7 +448,11 @@ Agent 是非确定性系统，"能复现"比"有日志"重要得多。`Tracer` �
 
 **首次接入不能硬失败。** 基线分支上还没有产物是正常的，比对脚本识别到产物缺失就输出"跳过对比"，否则第一个 PR 永远合不进去。
 
-**前端产物提交进仓库，就必须有人守着它别过期。** 把构建产物纳入版本控制是为了让 clone 下来 `pip install` 就能起服务——看项目的人不该为了打开界面先装一套 Node 工具链。代价是产物会和源码脱节：改了 `web/` 却忘了构建，仓库里的界面就是旧的，而且没有任何报错。所以 CI 重新构建一遍再比对 `git status`，不一致就失败。为此还要把 `keel/server/static/**` 在 `.gitattributes` 里标成 `-text`：本机在 Windows 构建、CI 在 Linux 重建，中间只要有一次 CRLF 转换，字节比对就会误报。
+**前端产物提交进仓库，就必须有人守着它别过期。** 把构建产物纳入版本控制是为了让 clone 下来 `pip install` 就能起服务——看项目的人不该为了打开界面先装一套 Node 工具链。代价是产物会和源码脱节：改了 `web/` 却忘了构建，仓库里的界面就是旧的，而且没有任何报错。
+
+守法的第一版是在 CI 上重新构建再逐字节比对产物，它在真实 PR 上挂了。原因不是产物真的过期，而是这个做法预设了跨平台可复现构建：本机 Windows + Node 24，CI Linux + Node 22，构建器的输出本就不保证逐字节一致。**它把"构建器的差异"报成了"你的产物过期了"**——而一个会误报的检查，很快就会被当成噪声跳过，等于这道防线白设。
+
+改成对**输入**取指纹：`npm run build` 把源码哈希写进 `web/.build-stamp`，CI 只重算一遍哈希做比对。它精确回答"产物是否由当前这份源码构建"，不依赖构建器可复现。哈希前要把 CRLF 归一成 LF——同一份文件 Windows 检出是 CRLF、Linux 是 LF，不归一化的话指纹自己就随平台漂移，等于把刚修的 bug 原样重犯一遍。校验必须排在构建之前，因为构建会重写 stamp。
 
 CI 全程跑在离线 Mock 上——零 API Key、零成本、完全确定性。换成真模型的话断言结果会取决于当天模型的心情，CI 就只能沦为摆设。
 
@@ -501,7 +505,8 @@ keel/
 web/                      控制台源码：React + TypeScript + Vite
 ├── src/types.ts          前后端契约：20 种 SSE 事件的联合类型
 ├── src/components/       EventStream · SpanTree · ZoneBars · Sparkline(内联 SVG)
-└── src/views/            六个页签
+├── src/views/            六个页签
+└── scripts/stamp.mjs     源码指纹：守住"产物由当前源码构建"
 scripts/demo.py           五个场景的命令行演示
 scripts/bench.py          A/B 护栏对照 + 五组机制消融（--json 产出结构化结果）
 scripts/report.py         实验产物 → Markdown 报告 / 回填 README
