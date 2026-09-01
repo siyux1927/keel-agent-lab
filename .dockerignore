@@ -12,6 +12,7 @@ site
 data/bench
 # 前端源码不进镜像: 镜像里跑的是已构建好的 keel/server/static, 不需要 Node
 web
-image.png
+# 根目录的截图只用于 README, 不该进镜像
+*.png
 DEV_SKILL.md
 .env
